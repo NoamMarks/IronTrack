@@ -139,5 +139,12 @@ export function useProgramData() {
     [clients, updateClients]
   );
 
-  return { clients, isBootstrapping, updateClients, addClient, saveSession };
+  const deleteClient = useCallback(
+    (clientId: string) => {
+      updateClients(clients.filter((c) => c.id !== clientId));
+    },
+    [clients, updateClients]
+  );
+
+  return { clients, isBootstrapping, updateClients, addClient, saveSession, deleteClient };
 }

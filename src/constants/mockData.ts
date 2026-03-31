@@ -19,6 +19,27 @@ export function createEmptyProgram(name: string): Program {
   };
 }
 
+export function createDefaultProgram(): Program {
+  const dayNames = ['Day A', 'Day B', 'Day C', 'Day D'];
+  return {
+    id: Math.random().toString(36).substring(7),
+    name: 'Training Block 1',
+    columns: [...DEFAULT_COLUMNS],
+    weeks: [
+      {
+        id: Math.random().toString(36).substring(7),
+        weekNumber: 1,
+        days: dayNames.map((name, i) => ({
+          id: Math.random().toString(36).substring(7),
+          dayNumber: i + 1,
+          name,
+          exercises: [],
+        })),
+      },
+    ],
+  };
+}
+
 export const MOCK_PROGRAM: Program = {
   id: 'p1',
   name: 'Hypertrophy Phase 1',

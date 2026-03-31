@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ProgramEditor } from './ProgramEditor';
 import { cn } from '../../lib/utils';
+import { createDefaultProgram } from '../../constants/mockData';
 import type { Client, Program } from '../../types';
 
 interface AdminViewProps {
@@ -22,6 +23,29 @@ export function AdminView({ clients, onUpdateClients, onBack }: AdminViewProps) 
   const handleSelectClient = (client: Client) => {
     setSelectedClient(client);
     setEditingProgram(client.programs[0] ?? null);
+  };
+
+  const handleCreateProgram = () => {
+    if (!selectedClient) return;
+    const newProgram = createDefaultProgram();
+    const updatedClients = clients.map((c) =>
+      c.id === selectedClient.id
+        ? { ...c, programs: [...c.programs, newProgram], activeProgramId: newProgram.id }
+        : c
+    );
+    setEditingProgram(newProgram);
+    onUpdateClients(updatedClients);
+  };
+
+  const handleDeleteClient = (clientId: string) => {
+    if (!window.confirm('Remove this client and all their data? This cannot be undone.')) return;
+    const remaining = clients.filter((c) => c.id !== clientId);
+    onUpdateClients(remaining);
+    if (selectedClient?.id === clientId) {
+      const nextTrainee = remaining.filter((c) => c.role === 'trainee')[0] ?? null;
+      setSelectedClient(nextTrainee);
+      setEditingProgram(nextTrainee?.programs[0] ?? null);
+    }
   };
 
   const handleProgramChange = (updated: Program) => {
@@ -66,21 +90,29 @@ export function AdminView({ clients, onUpdateClients, onBack }: AdminViewProps) 
           </h3>
           <div className="space-y-3">
             {trainees.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => handleSelectClient(c)}
-                className={cn(
-                  'w-full text-left p-6 border transition-all rounded-sm',
-                  selectedClient?.id === c.id
-                    ? 'bg-foreground text-background border-foreground shadow-lg scale-[1.02]'
-                    : 'border-border hover:border-muted-foreground bg-card'
-                )}
-              >
-                <p className="font-bold text-lg tracking-tight">{c.name}</p>
-                <p className="text-[10px] font-mono opacity-60 uppercase tracking-widest mt-1">
-                  {c.email}
-                </p>
-              </button>
+              <div key={c.id} className="relative group">
+                <button
+                  onClick={() => handleSelectClient(c)}
+                  className={cn(
+                    'w-full text-left p-6 border transition-all rounded-sm pr-12',
+                    selectedClient?.id === c.id
+                      ? 'bg-foreground text-background border-foreground shadow-lg scale-[1.02]'
+                      : 'border-border hover:border-muted-foreground bg-card'
+                  )}
+                >
+                  <p className="font-bold text-lg tracking-tight">{c.name}</p>
+                  <p className="text-[10px] font-mono opacity-60 uppercase tracking-widest mt-1">
+                    {c.email}
+                  </p>
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDeleteClient(c.id); }}
+                  className="absolute top-3 right-3 p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all"
+                  title="Remove client"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             ))}
           </div>
         </div>
@@ -90,8 +122,19 @@ export function AdminView({ clients, onUpdateClients, onBack }: AdminViewProps) 
           {editingProgram ? (
             <ProgramEditor program={editingProgram} onChange={handleProgramChange} />
           ) : (
-            <div className="flex items-center justify-center py-20 text-muted-foreground font-mono text-sm">
-              No program assigned to this client.
+            <div className="flex flex-col items-center justify-center py-32 space-y-6">
+              <p className="text-muted-foreground font-mono text-xs uppercase tracking-widest">
+                No program assigned
+              </p>
+              <h2 className="text-4xl font-bold italic font-serif text-foreground tracking-tight">
+                Ready to Build?
+              </h2>
+              <button
+                onClick={handleCreateProgram}
+                className="bg-foreground text-background px-8 py-4 text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all shadow-lg"
+              >
+                + Create New Block
+              </button>
             </div>
           )}
         </div>
