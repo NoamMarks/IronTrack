@@ -159,6 +159,11 @@ export function AdminView({ clients, onUpdateClients, onResetPassword, onBack }:
           )}
         </div>
       </div>
+
+      {/* Version footer */}
+      <div className="text-center text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest pt-4">
+        IronTrack v{__APP_VERSION__}
+      </div>
     </div>
   );
 }

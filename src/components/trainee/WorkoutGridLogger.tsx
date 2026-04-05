@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
-import { ArrowLeft, Save, Circle, Upload, Play } from 'lucide-react';
+import { ArrowLeft, Save, Circle, Upload, Play, Calculator } from 'lucide-react';
 import { TechnicalCard, TechnicalInput } from '../ui';
 import { cn } from '../../lib/utils';
 import { DEFAULT_COLUMNS } from '../../constants/mockData';
+import { PlateCalculator } from './PlateCalculator';
 import type { Client, Program, WorkoutWeek, WorkoutDay, ExercisePlan } from '../../types';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
@@ -46,6 +47,8 @@ export function WorkoutGridLogger({
   const [exercises, setExercises] = useState<ExercisePlan[]>(day.exercises);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  const [plateCalcOpen, setPlateCalcOpen] = useState(false);
+  const [plateCalcWeight, setPlateCalcWeight] = useState('');
 
   const columns = program.columns ?? DEFAULT_COLUMNS;
 
@@ -154,13 +157,28 @@ export function WorkoutGridLogger({
                       {String(getExerciseValue(ex, col.id) ?? '-') || '-'}
                     </span>
                   ) : (
-                    <TechnicalInput
-                      value={String(getExerciseValue(ex, col.id) ?? '')}
-                      onChange={(val) => updateExercise(ex.id, col.id, val)}
-                      placeholder="..."
-                      className="text-center"
-                      data-testid={`input-${ex.id}-${col.id}`}
-                    />
+                    <div className="flex items-center gap-1 w-full">
+                      <TechnicalInput
+                        value={String(getExerciseValue(ex, col.id) ?? '')}
+                        onChange={(val) => updateExercise(ex.id, col.id, val)}
+                        placeholder="..."
+                        className="text-center"
+                        data-testid={`input-${ex.id}-${col.id}`}
+                      />
+                      {col.id === 'actualLoad' && (
+                        <button
+                          onClick={() => {
+                            setPlateCalcWeight(String(getExerciseValue(ex, 'actualLoad') ?? ''));
+                            setPlateCalcOpen(true);
+                          }}
+                          className="shrink-0 w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                          title="Plate calculator"
+                          data-testid={`plate-calc-btn-${ex.id}`}
+                        >
+                          <Calculator className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}
@@ -209,6 +227,12 @@ export function WorkoutGridLogger({
         </div>
         <span>Session ID: {SESSION_ID}</span>
       </div>
+
+      <PlateCalculator
+        isOpen={plateCalcOpen}
+        onClose={() => setPlateCalcOpen(false)}
+        initialWeight={plateCalcWeight}
+      />
     </div>
   );
 }

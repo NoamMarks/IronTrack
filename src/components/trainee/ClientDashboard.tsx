@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { ArrowLeft, AlertCircle } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Smartphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TechnicalCard } from '../ui';
 import { cn } from '../../lib/utils';
+import { useWakeLock } from '../../hooks/useWakeLock';
 import type { Client, WorkoutWeek, WorkoutDay } from '../../types';
 
 interface ClientDashboardProps {
@@ -17,6 +18,8 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
 
   const [selectedWeekId, setSelectedWeekId] = useState(activeProgram?.weeks[0]?.id);
   const selectedWeek = activeProgram?.weeks.find((w) => w.id === selectedWeekId) ?? activeProgram?.weeks[0];
+
+  const wakeLock = useWakeLock();
 
   if (!activeProgram) {
     return (
@@ -53,6 +56,22 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
             </p>
           </div>
         </div>
+        {/* Gym Mode toggle */}
+        {wakeLock.isSupported && (
+          <button
+            onClick={() => void wakeLock.toggle()}
+            data-testid="gym-mode-toggle"
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-widest border transition-all',
+              wakeLock.isActive
+                ? 'bg-green-600 text-white border-green-600'
+                : 'border-border text-muted-foreground hover:border-muted-foreground'
+            )}
+          >
+            <Smartphone className="w-4 h-4" />
+            {wakeLock.isActive ? 'Gym Mode On' : 'Gym Mode'}
+          </button>
+        )}
       </header>
 
       {/* Week selector */}
@@ -127,6 +146,11 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
             </motion.div>
           ))}
         </AnimatePresence>
+      </div>
+
+      {/* Version footer */}
+      <div className="text-center text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest pt-4">
+        IronTrack v{__APP_VERSION__}
       </div>
     </div>
   );

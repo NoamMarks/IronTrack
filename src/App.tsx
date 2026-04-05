@@ -9,6 +9,7 @@ import { cn } from './lib/utils';
 import { AdminView } from './components/admin/AdminView';
 import { ClientDashboard } from './components/trainee/ClientDashboard';
 import { WorkoutGridLogger } from './components/trainee/WorkoutGridLogger';
+import { RestTimer } from './components/trainee/RestTimer';
 import { checkPasswordStrength } from './lib/crypto';
 import type { Client, WorkoutWeek, WorkoutDay } from './types';
 
@@ -470,6 +471,7 @@ export default function App() {
           onBack={() => setActiveWorkout(null)}
           onSave={handleSaveSession}
         />
+        <RestTimer />
       </AppShell>
     );
   }
