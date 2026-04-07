@@ -24,8 +24,6 @@ export interface WorkoutDay {
   dayNumber: number;
   name: string;
   exercises: ExercisePlan[];
-  /** 1–10 self-reported readiness; logged when the trainee saves a session */
-  readiness?: number;
   /** ISO timestamp of the last save — used by analytics to order sessions chronologically */
   loggedAt?: string;
 }

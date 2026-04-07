@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react';
-import { TrendingUp, Activity, AlertCircle } from 'lucide-react';
+import { TrendingUp, AlertCircle } from 'lucide-react';
+import { motion } from 'motion/react';
 import {
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -11,11 +12,7 @@ import {
 } from 'recharts';
 import { TechnicalCard } from '../ui';
 import { cn } from '../../lib/utils';
-import {
-  aggregateE1RM,
-  aggregateReadiness,
-  listLoggedExercises,
-} from '../../lib/analytics';
+import { aggregateE1RM, listLoggedExercises } from '../../lib/analytics';
 import type { Client } from '../../types';
 
 interface AnalyticsDashboardProps {
@@ -32,8 +29,6 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
     () => (selectedExerciseId ? aggregateE1RM(client, selectedExerciseId) : []),
     [client, selectedExerciseId]
   );
-
-  const readinessData = useMemo(() => aggregateReadiness(client), [client]);
 
   return (
     <div className="space-y-10" data-testid="analytics-dashboard">
@@ -82,7 +77,13 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
           ) : (
             <div className="h-72" data-testid="e1rm-chart">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={e1rmData} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
+                <AreaChart data={e1rmData} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="e1rmGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#22c55e" stopOpacity={0.6} />
+                      <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} />
                   <XAxis dataKey="date" stroke="currentColor" fontSize={10} fontFamily="monospace" opacity={0.6} />
                   <YAxis stroke="currentColor" fontSize={10} fontFamily="monospace" opacity={0.6} unit="kg" />
@@ -95,81 +96,38 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
                       fontFamily: 'monospace',
                     }}
                   />
-                  <Line
+                  <Area
                     type="monotone"
                     dataKey="e1rm"
                     name="e1RM (kg)"
                     stroke="#22c55e"
                     strokeWidth={2}
+                    fill="url(#e1rmGradient)"
                     dot={{ fill: '#22c55e', r: 4 }}
                     activeDot={{ r: 6 }}
                   />
-                </LineChart>
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           )}
         </div>
       </TechnicalCard>
 
-      {/* ── Chart B: Fatigue / Readiness ──────────────────────────────── */}
-      <TechnicalCard>
-        <div className="p-8 space-y-6">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-foreground text-background flex items-center justify-center rounded-sm">
-              <Activity className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-2xl font-bold italic font-serif tracking-tight">
-                Readiness
-              </h3>
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest mt-1">
-                Self-Reported · 1–10 · Fatigue Trend
-              </p>
-            </div>
-          </div>
-
-          {readinessData.length === 0 ? (
-            <EmptyChart message="No readiness scores logged yet — set readiness when saving a session." />
-          ) : (
-            <div className="h-72" data-testid="readiness-chart">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={readinessData} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} />
-                  <XAxis dataKey="date" stroke="currentColor" fontSize={10} fontFamily="monospace" opacity={0.6} />
-                  <YAxis domain={[0, 10]} stroke="currentColor" fontSize={10} fontFamily="monospace" opacity={0.6} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '2px',
-                      fontSize: '12px',
-                      fontFamily: 'monospace',
-                    }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="readiness"
-                    name="Readiness"
-                    stroke="#3b82f6"
-                    strokeWidth={2}
-                    dot={{ fill: '#3b82f6', r: 4 }}
-                    activeDot={{ r: 6 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-      </TechnicalCard>
     </div>
   );
 }
 
 function EmptyChart({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center" data-testid="empty-chart">
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: 'easeOut' }}
+      className="flex flex-col items-center justify-center py-16 text-center"
+      data-testid="empty-chart"
+    >
       <AlertCircle className="w-8 h-8 text-muted-foreground mb-3" />
       <p className="text-xs font-mono text-muted-foreground max-w-sm">{message}</p>
-    </div>
+    </motion.div>
   );
 }

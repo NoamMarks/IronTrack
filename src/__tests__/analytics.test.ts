@@ -4,7 +4,6 @@ import {
   parseReps,
   parseLoad,
   aggregateE1RM,
-  aggregateReadiness,
   listLoggedExercises,
 } from '../lib/analytics';
 import type { Client, Program } from '../types';
@@ -151,40 +150,6 @@ describe('aggregateE1RM', () => {
 
   it('returns empty array for a client with no programs', () => {
     expect(aggregateE1RM(makeClient([]), 'squat')).toEqual([]);
-  });
-});
-
-describe('aggregateReadiness', () => {
-  const program: Program = {
-    id: 'p1',
-    name: 'Block 1',
-    status: 'active',
-    columns: [],
-    weeks: [
-      {
-        id: 'w1',
-        weekNumber: 1,
-        days: [
-          { id: 'd1', dayNumber: 1, name: 'A', exercises: [], loggedAt: '2026-02-01T10:00:00Z', readiness: 8 },
-          { id: 'd2', dayNumber: 2, name: 'B', exercises: [], loggedAt: '2026-02-03T10:00:00Z', readiness: 6 },
-          { id: 'd3', dayNumber: 3, name: 'C', exercises: [], loggedAt: '2026-02-05T10:00:00Z' }, // no readiness
-          { id: 'd4', dayNumber: 4, name: 'D', exercises: [], readiness: 7 }, // not logged
-        ],
-      },
-    ],
-  };
-
-  it('returns only logged days with readiness scores, sorted', () => {
-    const result = aggregateReadiness(makeClient([program]));
-    expect(result).toHaveLength(2);
-    expect(result[0].date).toBe('2026-02-01');
-    expect(result[0].readiness).toBe(8);
-    expect(result[1].date).toBe('2026-02-03');
-    expect(result[1].readiness).toBe(6);
-  });
-
-  it('returns empty array for a client with no readiness data', () => {
-    expect(aggregateReadiness(makeClient([]))).toEqual([]);
   });
 });
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Mic, MicOff, X, Plus, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { parseTimerCommand } from '../../lib/voiceCommands';
+import { hapticAlarm } from '../../lib/haptics';
 import { cn } from '../../lib/utils';
 
 // ─── SpeechRecognition type bridge ──────────────────────────────────────────
@@ -59,6 +60,7 @@ export function RestTimer() {
         setRemaining((prev) => {
           if (prev <= 1) {
             setIsRunning(false);
+            hapticAlarm();
             return 0;
           }
           return prev - 1;

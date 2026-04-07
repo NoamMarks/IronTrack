@@ -1,9 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { ArrowLeft, Save, Circle, Upload, Play, Calculator } from 'lucide-react';
-import { TechnicalCard, TechnicalInput } from '../ui';
+import { TechnicalCard, TechnicalInput, RPEBadge } from '../ui';
 import { cn } from '../../lib/utils';
 import { DEFAULT_COLUMNS } from '../../constants/mockData';
 import { PlateCalculator } from './PlateCalculator';
+import { hapticTick, hapticSuccess } from '../../lib/haptics';
 import type { Client, Program, WorkoutWeek, WorkoutDay, ExercisePlan } from '../../types';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
@@ -45,15 +46,19 @@ export function WorkoutGridLogger({
   onSave,
 }: WorkoutGridLoggerProps) {
   const [exercises, setExercises] = useState<ExercisePlan[]>(day.exercises);
-  const [readiness, setReadiness] = useState<number | undefined>(day.readiness);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
   const [plateCalcOpen, setPlateCalcOpen] = useState(false);
   const [plateCalcWeight, setPlateCalcWeight] = useState('');
+  const [plateCalcExerciseId, setPlateCalcExerciseId] = useState<string | null>(null);
 
   const columns = program.columns ?? DEFAULT_COLUMNS;
 
   const updateExercise = (id: string, field: string, value: string) => {
+    // Gentle haptic tick only when the user logs an actual (not plan edits, not empty clears)
+    if (['actualLoad', 'actualRpe'].includes(field) && value.trim() !== '') {
+      hapticTick();
+    }
     setExercises((prev) =>
       prev.map((ex) => {
         if (ex.id !== id) return ex;
@@ -63,6 +68,11 @@ export function WorkoutGridLogger({
         return { ...ex, values: { ...(ex.values ?? {}), [field]: value } };
       })
     );
+  };
+
+  const handleSave = () => {
+    hapticSuccess();
+    onSave({ ...day, exercises });
   };
 
   const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -93,27 +103,8 @@ export function WorkoutGridLogger({
           </div>
         </div>
         <div className="flex items-end gap-4">
-          {/* Readiness input */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">
-              Readiness 1–10
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={10}
-              value={readiness ?? ''}
-              onChange={(e) => {
-                const v = e.target.value === '' ? undefined : Math.max(1, Math.min(10, Number(e.target.value)));
-                setReadiness(v);
-              }}
-              data-testid="readiness-input"
-              className="w-20 bg-muted/30 border border-border px-3 py-2 text-center font-mono text-sm text-foreground outline-none focus:border-foreground transition-colors"
-              placeholder="—"
-            />
-          </div>
           <button
-            onClick={() => onSave({ ...day, exercises, readiness })}
+            onClick={handleSave}
             data-testid="save-session-btn"
             className="bg-green-600 text-white px-8 py-4 text-xs font-bold uppercase tracking-widest flex items-center hover:bg-green-500 transition-all shadow-lg hover:shadow-green-500/20"
           >
@@ -175,15 +166,19 @@ export function WorkoutGridLogger({
                   )}
                 >
                   {col.type === 'plan' ? (
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {String(getExerciseValue(ex, col.id) ?? '-') || '-'}
-                    </span>
+                    col.id === 'expectedRpe' ? (
+                      <RPEBadge value={getExerciseValue(ex, col.id) as string | number | undefined} />
+                    ) : (
+                      <span className="text-xs text-muted-foreground font-mono">
+                        {String(getExerciseValue(ex, col.id) ?? '-') || '-'}
+                      </span>
+                    )
                   ) : (
                     <div className="flex items-center gap-1 w-full">
                       <TechnicalInput
                         value={String(getExerciseValue(ex, col.id) ?? '')}
                         onChange={(val) => updateExercise(ex.id, col.id, val)}
-                        placeholder="..."
+                        placeholder=""
                         className="text-center"
                         data-testid={`input-${ex.id}-${col.id}`}
                       />
@@ -191,6 +186,7 @@ export function WorkoutGridLogger({
                         <button
                           onClick={() => {
                             setPlateCalcWeight(String(getExerciseValue(ex, 'actualLoad') ?? ''));
+                            setPlateCalcExerciseId(ex.id);
                             setPlateCalcOpen(true);
                           }}
                           className="shrink-0 w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
@@ -252,8 +248,18 @@ export function WorkoutGridLogger({
 
       <PlateCalculator
         isOpen={plateCalcOpen}
-        onClose={() => setPlateCalcOpen(false)}
+        onClose={() => {
+          setPlateCalcOpen(false);
+          setPlateCalcExerciseId(null);
+        }}
         initialWeight={plateCalcWeight}
+        onApply={(weight) => {
+          if (plateCalcExerciseId) {
+            updateExercise(plateCalcExerciseId, 'actualLoad', weight);
+          }
+          setPlateCalcOpen(false);
+          setPlateCalcExerciseId(null);
+        }}
       />
     </div>
   );

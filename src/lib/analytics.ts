@@ -46,12 +46,6 @@ export interface E1RMPoint {
   programName: string;
 }
 
-export interface ReadinessPoint {
-  date: string;
-  readiness: number;
-  programName: string;
-}
-
 // ─── Aggregation ─────────────────────────────────────────────────────────────
 
 /**
@@ -94,30 +88,6 @@ function e1rmPointFromExercise(
     exerciseName: ex.exerciseName,
     programName: program.name,
   };
-}
-
-/**
- * Aggregate all logged readiness scores across every program for the client.
- * Skips days where readiness was not recorded.
- */
-export function aggregateReadiness(client: Client): ReadinessPoint[] {
-  const points: ReadinessPoint[] = [];
-
-  for (const program of client.programs) {
-    for (const week of program.weeks) {
-      for (const day of week.days) {
-        if (!day.loggedAt) continue;
-        if (day.readiness === undefined || day.readiness === null) continue;
-        points.push({
-          date: day.loggedAt.slice(0, 10),
-          readiness: day.readiness,
-          programName: program.name,
-        });
-      }
-    }
-  }
-
-  return points.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**
