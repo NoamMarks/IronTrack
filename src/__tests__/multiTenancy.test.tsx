@@ -69,8 +69,9 @@ describe('Multi-Tenancy Isolation', () => {
       <AdminView
         clients={ALL_CLIENTS}
         authenticatedUser={COACH_A}
-        onUpdateClients={vi.fn()}
-        onResetPassword={vi.fn().mockResolvedValue(undefined)}
+        onSaveProgram={vi.fn().mockResolvedValue(undefined)}
+        onCreateProgram={vi.fn().mockResolvedValue({} as never)}
+        onDeleteClient={vi.fn().mockResolvedValue(undefined)}
         onArchiveProgram={vi.fn()}
         onBack={vi.fn()}
       />
@@ -88,8 +89,9 @@ describe('Multi-Tenancy Isolation', () => {
       <AdminView
         clients={ALL_CLIENTS}
         authenticatedUser={COACH_B}
-        onUpdateClients={vi.fn()}
-        onResetPassword={vi.fn().mockResolvedValue(undefined)}
+        onSaveProgram={vi.fn().mockResolvedValue(undefined)}
+        onCreateProgram={vi.fn().mockResolvedValue({} as never)}
+        onDeleteClient={vi.fn().mockResolvedValue(undefined)}
         onArchiveProgram={vi.fn()}
         onBack={vi.fn()}
       />
@@ -107,8 +109,9 @@ describe('Multi-Tenancy Isolation', () => {
       <AdminView
         clients={ALL_CLIENTS}
         authenticatedUser={COACH_A}
-        onUpdateClients={vi.fn()}
-        onResetPassword={vi.fn().mockResolvedValue(undefined)}
+        onSaveProgram={vi.fn().mockResolvedValue(undefined)}
+        onCreateProgram={vi.fn().mockResolvedValue({} as never)}
+        onDeleteClient={vi.fn().mockResolvedValue(undefined)}
         onArchiveProgram={vi.fn()}
         onBack={vi.fn()}
       />

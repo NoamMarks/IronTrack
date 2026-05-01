@@ -136,7 +136,7 @@ vi.mock('../lib/inviteCodes', async () => {
   const actual = await vi.importActual<typeof import('../lib/inviteCodes')>('../lib/inviteCodes');
   return {
     ...actual,
-    lookupInviteCode: (code: string) =>
+    lookupInviteCode: async (code: string) =>
       code.trim().toUpperCase() === 'VALID123'
         ? {
             id: 'inv1',
@@ -148,7 +148,7 @@ vi.mock('../lib/inviteCodes', async () => {
             useCount: 0,
           }
         : null,
-    consumeInviteCode: vi.fn(),
+    consumeInviteCode: vi.fn().mockResolvedValue(undefined),
     buildInviteLink: (code: string) => `http://localhost/signup?invite=${code}`,
     normalizeInviteCode: (s: string) => s.replace(/\s+/g, '').toUpperCase(),
   };
@@ -161,7 +161,7 @@ describe('Phase 1C: SignupPage form validation states', () => {
     return { onComplete };
   };
 
-  it('shows a malformed-email error and does not advance', () => {
+  it('shows a malformed-email error and does not advance', async () => {
     renderSignup();
     fireEvent.change(screen.getByTestId('signup-name'),     { target: { value: 'Test User' } });
     fireEvent.change(screen.getByTestId('signup-email'),    { target: { value: 'not-an-email' } });
@@ -169,11 +169,11 @@ describe('Phase 1C: SignupPage form validation states', () => {
     fireEvent.change(screen.getByTestId('signup-confirm'),  { target: { value: 'Password1' } });
     fireEvent.change(screen.getByTestId('signup-invite-code'), { target: { value: 'VALID123' } });
     fireEvent.click(screen.getByTestId('signup-submit-btn'));
-    expect(screen.getByText(/valid email address/i)).toBeInTheDocument();
+    expect(await screen.findByText(/valid email address/i)).toBeInTheDocument();
     expect(screen.queryByTestId('signup-otp')).toBeNull();
   });
 
-  it('shows password-strength errors and does not advance', () => {
+  it('shows password-strength errors and does not advance', async () => {
     renderSignup();
     fireEvent.change(screen.getByTestId('signup-name'),     { target: { value: 'Test User' } });
     fireEvent.change(screen.getByTestId('signup-email'),    { target: { value: 't@t.com' } });
@@ -181,11 +181,11 @@ describe('Phase 1C: SignupPage form validation states', () => {
     fireEvent.change(screen.getByTestId('signup-confirm'),  { target: { value: 'short' } });
     fireEvent.change(screen.getByTestId('signup-invite-code'), { target: { value: 'VALID123' } });
     fireEvent.click(screen.getByTestId('signup-submit-btn'));
-    expect(screen.getAllByText(/Password:/i).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Password:/i)).length).toBeGreaterThan(0);
     expect(screen.queryByTestId('signup-otp')).toBeNull();
   });
 
-  it('shows password-mismatch error and does not advance', () => {
+  it('shows password-mismatch error and does not advance', async () => {
     renderSignup();
     fireEvent.change(screen.getByTestId('signup-name'),     { target: { value: 'Test User' } });
     fireEvent.change(screen.getByTestId('signup-email'),    { target: { value: 't@t.com' } });
@@ -193,7 +193,7 @@ describe('Phase 1C: SignupPage form validation states', () => {
     fireEvent.change(screen.getByTestId('signup-confirm'),  { target: { value: 'Different1' } });
     fireEvent.change(screen.getByTestId('signup-invite-code'), { target: { value: 'VALID123' } });
     fireEvent.click(screen.getByTestId('signup-submit-btn'));
-    expect(screen.getByText(/Passwords do not match/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Passwords do not match/i)).toBeInTheDocument();
     expect(screen.queryByTestId('signup-otp')).toBeNull();
   });
 });

@@ -44,7 +44,7 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
     if (editingColumn) {
       updated = allCols.map((c) => c.id === editingColumn.id ? { ...c, label, type } : c);
     } else {
-      const newCol: ProgramColumn = { id: Math.random().toString(36).substring(7), label, type };
+      const newCol: ProgramColumn = { id: crypto.randomUUID(), label, type };
       updated = [...allCols, newCol];
     }
     onChange({ ...program, columns: updated });
@@ -90,15 +90,15 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
   const addWeek = () => {
     const nextNum = program.weeks.length + 1;
     const newWeek = {
-      id: Math.random().toString(36).substring(7),
+      id: crypto.randomUUID(),
       weekNumber: nextNum,
       days: program.weeks.length > 0
         ? program.weeks[0].days.map((d) => ({
             ...d,
-            id: Math.random().toString(36).substring(7),
+            id: crypto.randomUUID(),
             exercises: d.exercises.map((ex) => ({
               ...ex,
-              id: Math.random().toString(36).substring(7),
+              id: crypto.randomUUID(),
               actualLoad: '', actualRpe: '', notes: '', videoUrl: '', values: {},
             })),
           }))
@@ -122,7 +122,7 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
     const week = program.weeks.find((w) => w.id === weekId);
     const nextDayNum = (week?.days.length ?? 0) + 1;
     const newDay = {
-      id: Math.random().toString(36).substring(7),
+      id: crypto.randomUUID(),
       dayNumber: nextDayNum,
       name: 'New Workout',
       exercises: [],
@@ -132,7 +132,7 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
       ...program,
       weeks: program.weeks.map((w) => ({
         ...w,
-        days: [...w.days, { ...newDay, id: Math.random().toString(36).substring(7) }],
+        days: [...w.days, { ...newDay, id: crypto.randomUUID() }],
       })),
     });
   };
@@ -165,7 +165,7 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
     const day = program.weeks.find((w) => w.id === weekId)?.days.find((d) => d.id === dayId);
     if (!day) return;
     const newEx: ExercisePlan = {
-      id: Math.random().toString(36).substring(7),
+      id: crypto.randomUUID(),
       exerciseId: 'new',
       exerciseName: 'New Exercise',
       sets: 3,
@@ -179,7 +179,7 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
         ...w,
         days: w.days.map((d) =>
           d.dayNumber === day.dayNumber
-            ? { ...d, exercises: [...d.exercises, { ...newEx, id: Math.random().toString(36).substring(7) }] }
+            ? { ...d, exercises: [...d.exercises, { ...newEx, id: crypto.randomUUID() }] }
             : d
         ),
       })),

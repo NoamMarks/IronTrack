@@ -243,7 +243,7 @@ export function AddClientModal({
 }: {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (name: string, email: string, password: string, role: UserRole, tenantId?: string) => Promise<Client>;
+  onAdd: (name: string, email: string, password: string, role: UserRole, tenantId?: string) => Promise<unknown>;
   tenantId?: string;
 }) {
   const [name, setName] = useState('');
@@ -446,8 +446,18 @@ function AppShell({
 // ─── Root App ────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const { clients, isBootstrapping, updateClients, addClient, saveSession, resetPassword, archiveProgram, getClientsForTenant } = useProgramData();
-  const { authenticatedUser, view, loginError, login, logout, setView, impersonating, impersonate, stopImpersonating } = useAuth();
+  const { authenticatedUser, view, loginError, isLoading: isAuthLoading, login, logout, setView, impersonating, impersonate, stopImpersonating } = useAuth();
+  const {
+    clients,
+    isLoadingData,
+    addClient,
+    saveProgram,
+    saveSession,
+    archiveProgram,
+    deleteClient,
+    createProgram,
+    getClientsForTenant,
+  } = useProgramData(authenticatedUser);
 
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [activeWorkout, setActiveWorkout] = useState<{ week: WorkoutWeek; day: WorkoutDay } | null>(null);
@@ -589,10 +599,15 @@ export default function App() {
     setToast('Session saved successfully');
   };
 
-  const handleAddCoach = async (name: string, email: string, password: string) => {
-    // Coaches act as their own tenant root; addClient defaults tenantId to the
-    // generated id when role==='admin', so a new coach satisfies id===tenantId.
-    return await addClient(name, email, password, 'admin');
+  const handleAddCoach = async (name: string, email: string, password: string): Promise<Client> => {
+    // Phase 3: creating a coach client-side requires Supabase service-role
+    // privileges (admin.createUser). The signUp flow would log the superadmin
+    // out, so we surface an explicit error here instead. A serverless
+    // function (api/admin-create-user.ts) is the planned follow-up.
+    console.warn('[IronTrack] handleAddCoach not implemented in Phase 3', { name, email, hasPassword: !!password });
+    throw new Error(
+      'Creating coaches from the UI is not yet wired up to Supabase. Send the new coach a signup link instead.',
+    );
   };
 
   // Keep selectedClient in sync with the clients store (e.g. after coach edits)
@@ -649,7 +664,7 @@ export default function App() {
         onSignup={() => setView('signup')}
         onForgot={() => setView('forgot')}
         loginError={loginError}
-        isBootstrapping={isBootstrapping}
+        isBootstrapping={isAuthLoading}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
@@ -733,8 +748,10 @@ export default function App() {
         <AdminView
           clients={clients}
           authenticatedUser={authenticatedUser}
-          onUpdateClients={updateClients}
-          onResetPassword={resetPassword}
+          isLoadingData={isLoadingData}
+          onSaveProgram={saveProgram}
+          onCreateProgram={createProgram}
+          onDeleteClient={deleteClient}
           onArchiveProgram={archiveProgram}
           onBack={() => {
             if (impersonating) {

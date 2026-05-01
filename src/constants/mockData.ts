@@ -14,7 +14,7 @@ export const DEFAULT_COLUMNS: ProgramColumn[] = [
 
 export function createEmptyProgram(name: string, tenantId?: string): Program {
   return {
-    id: Math.random().toString(36).substring(7),
+    id: crypto.randomUUID(),
     name,
     weeks: [],
     columns: [...DEFAULT_COLUMNS],
@@ -27,7 +27,7 @@ export function createEmptyProgram(name: string, tenantId?: string): Program {
 export function createDefaultProgram(tenantId?: string): Program {
   const dayNames = ['Day A', 'Day B', 'Day C', 'Day D'];
   return {
-    id: Math.random().toString(36).substring(7),
+    id: crypto.randomUUID(),
     name: 'Training Block 1',
     columns: [...DEFAULT_COLUMNS],
     status: 'active',
@@ -35,10 +35,10 @@ export function createDefaultProgram(tenantId?: string): Program {
     tenantId,
     weeks: [
       {
-        id: Math.random().toString(36).substring(7),
+        id: crypto.randomUUID(),
         weekNumber: 1,
         days: dayNames.map((name, i) => ({
-          id: Math.random().toString(36).substring(7),
+          id: crypto.randomUUID(),
           dayNumber: i + 1,
           name,
           exercises: [],

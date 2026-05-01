@@ -123,8 +123,9 @@ describe('AdminView archive action', () => {
       <AdminView
         clients={[TRAINEE]}
         authenticatedUser={COACH}
-        onUpdateClients={vi.fn()}
-        onResetPassword={vi.fn().mockResolvedValue(undefined)}
+        onSaveProgram={vi.fn().mockResolvedValue(undefined)}
+        onCreateProgram={vi.fn().mockResolvedValue({} as never)}
+        onDeleteClient={vi.fn().mockResolvedValue(undefined)}
         onArchiveProgram={onArchive}
         onBack={vi.fn()}
       />
@@ -135,7 +136,6 @@ describe('AdminView archive action', () => {
   });
 
   it('shows the empty "Ready to Build?" state once the active program is archived', () => {
-    const onUpdate = vi.fn();
     const onArchive = vi.fn();
 
     // Render with a client that has only an archived program → no active block
@@ -144,8 +144,9 @@ describe('AdminView archive action', () => {
       <AdminView
         clients={[archivedOnly]}
         authenticatedUser={COACH}
-        onUpdateClients={onUpdate}
-        onResetPassword={vi.fn().mockResolvedValue(undefined)}
+        onSaveProgram={vi.fn().mockResolvedValue(undefined)}
+        onCreateProgram={vi.fn().mockResolvedValue({} as never)}
+        onDeleteClient={vi.fn().mockResolvedValue(undefined)}
         onArchiveProgram={onArchive}
         onBack={vi.fn()}
       />

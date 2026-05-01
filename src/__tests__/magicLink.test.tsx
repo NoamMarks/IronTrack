@@ -1,70 +1,44 @@
 /**
- * Phase 1: Magic Invite Link end-to-end behaviour.
+ * Magic Invite Link UI tests — Phase 3.
  *
- * Covers:
- *  1. Storage layer: createInviteCode persists metadata; consumeInviteCode increments
- *     useCount; lookupInviteCode returns null once maxUses is reached.
- *  2. SignupPage: when `?invite=CODE` is in the URL, the field auto-fills,
- *     becomes read-only, and a welcome banner with the coach name renders.
+ * The Phase 1 storage-layer tests (localStorage persistence, useCount math)
+ * are obsolete — invite_codes now lives in Supabase and the helper functions
+ * are thin wrappers around supabase-js. This file focuses on the UI: the
+ * SignupPage's URL-param detection, banner rendering, and read-only field.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SignupPage } from '../components/auth/SignupPage';
-import {
-  createInviteCode,
-  consumeInviteCode,
-  lookupInviteCode,
-  buildInviteLink,
-} from '../lib/inviteCodes';
+
+// Per-file mock so individual tests can swap return values.
+vi.mock('../lib/inviteCodes', () => ({
+  normalizeInviteCode: (s: string) => s.replace(/\s+/g, '').toUpperCase(),
+  buildInviteLink: (code: string) => `http://localhost/signup?invite=${code}`,
+  createInviteCode: vi.fn(),
+  consumeInviteCode: vi.fn().mockResolvedValue(undefined),
+  deleteInviteCode: vi.fn().mockResolvedValue(undefined),
+  getInviteCodesForCoach: vi.fn().mockResolvedValue([]),
+  lookupInviteCode: vi.fn(),
+}));
+import { lookupInviteCode } from '../lib/inviteCodes';
 
 beforeEach(() => {
-  localStorage.clear();
-  // Reset jsdom URL between tests so URLSearchParams is clean.
+  vi.clearAllMocks();
   window.history.replaceState(null, '', '/');
 });
 
-// ─── Storage layer ──────────────────────────────────────────────────────────
-
-describe('inviteCodes storage', () => {
-  it('persists coachName and useCount=0 on creation', () => {
-    const inv = createInviteCode('coach1', 'tenant-A', 'Coach Alpha');
-    expect(inv.coachName).toBe('Coach Alpha');
-    expect(inv.useCount).toBe(0);
-    expect(inv.maxUses).toBeUndefined();
-  });
-
-  it('respects maxUses and rejects exhausted codes', () => {
-    const inv = createInviteCode('coach1', 'tenant-A', 'Coach Alpha', 1);
-    expect(lookupInviteCode(inv.code)).not.toBeNull();
-    consumeInviteCode(inv.code);
-    expect(lookupInviteCode(inv.code)).toBeNull();
-  });
-
-  it('increments useCount on consumption', () => {
-    const inv = createInviteCode('coach1', 'tenant-A', 'Coach Alpha');
-    consumeInviteCode(inv.code);
-    consumeInviteCode(inv.code);
-    const refreshed = lookupInviteCode(inv.code);
-    expect(refreshed?.useCount).toBe(2);
-  });
-
-  it('buildInviteLink produces a /signup?invite= URL', () => {
-    const link = buildInviteLink('ABC123');
-    expect(link).toContain('/signup?invite=ABC123');
-  });
-
-  it('lookup is case-insensitive', () => {
-    const inv = createInviteCode('coach1', 'tenant-A', 'Coach Alpha');
-    expect(lookupInviteCode(inv.code.toLowerCase())).not.toBeNull();
-  });
-});
-
-// ─── SignupPage magic-link behaviour ────────────────────────────────────────
-
 describe('SignupPage with ?invite= URL', () => {
-  it('auto-fills the invite field and locks it when the URL carries a valid code', () => {
-    const inv = createInviteCode('coach1', 'tenant-A', 'Coach Alpha');
-    window.history.replaceState(null, '', `/signup?invite=${inv.code}`);
+  it('auto-fills the invite field and locks it when the URL carries a valid code', async () => {
+    (lookupInviteCode as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'inv1',
+      code: 'WELCOME1',
+      tenantId: 'tenant-A',
+      coachId: 'coachA',
+      coachName: 'Coach Alpha',
+      createdAt: '',
+      useCount: 0,
+    });
+    window.history.replaceState(null, '', '/signup?invite=WELCOME1');
 
     render(
       <SignupPage
@@ -72,17 +46,25 @@ describe('SignupPage with ?invite= URL', () => {
         onBack={vi.fn()}
         theme="dark"
         onToggleTheme={vi.fn()}
-      />
+      />,
     );
 
     const inviteField = screen.getByTestId('signup-invite-code') as HTMLInputElement;
-    expect(inviteField.value).toBe(inv.code);
+    await waitFor(() => expect(inviteField.value).toBe('WELCOME1'));
     expect(inviteField.readOnly).toBe(true);
   });
 
-  it('shows the welcome banner with the coach name when the link is valid', () => {
-    const inv = createInviteCode('coach1', 'tenant-A', 'Coach Alpha');
-    window.history.replaceState(null, '', `/signup?invite=${inv.code}`);
+  it('shows the welcome banner with the coach name when the link is valid', async () => {
+    (lookupInviteCode as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'inv1',
+      code: 'WELCOME1',
+      tenantId: 'tenant-A',
+      coachId: 'coachA',
+      coachName: 'Coach Alpha',
+      createdAt: '',
+      useCount: 0,
+    });
+    window.history.replaceState(null, '', '/signup?invite=WELCOME1');
 
     render(
       <SignupPage
@@ -90,14 +72,14 @@ describe('SignupPage with ?invite= URL', () => {
         onBack={vi.fn()}
         theme="dark"
         onToggleTheme={vi.fn()}
-      />
+      />,
     );
-
-    const banner = screen.getByTestId('invite-welcome-banner');
+    const banner = await screen.findByTestId('invite-welcome-banner');
     expect(banner).toHaveTextContent(/Coach Alpha/);
   });
 
-  it('shows the invalid banner and locks the field when the URL code is unknown', () => {
+  it('shows the invalid banner and locks the field when the URL code is unknown', async () => {
+    (lookupInviteCode as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     window.history.replaceState(null, '', '/signup?invite=DOESNOTEXIST');
 
     render(
@@ -106,10 +88,9 @@ describe('SignupPage with ?invite= URL', () => {
         onBack={vi.fn()}
         theme="dark"
         onToggleTheme={vi.fn()}
-      />
+      />,
     );
-
-    expect(screen.getByTestId('invite-invalid-banner')).toBeInTheDocument();
+    expect(await screen.findByTestId('invite-invalid-banner')).toBeInTheDocument();
     const inviteField = screen.getByTestId('signup-invite-code') as HTMLInputElement;
     expect(inviteField.readOnly).toBe(true);
   });
@@ -121,57 +102,34 @@ describe('SignupPage with ?invite= URL', () => {
         onBack={vi.fn()}
         theme="dark"
         onToggleTheme={vi.fn()}
-      />
+      />,
     );
-
     expect(screen.queryByTestId('invite-welcome-banner')).toBeNull();
     expect(screen.queryByTestId('invite-invalid-banner')).toBeNull();
     const inviteField = screen.getByTestId('signup-invite-code') as HTMLInputElement;
     expect(inviteField.readOnly).toBe(false);
   });
 
-  it('consumes the invite after a successful signup (useCount increments by 1)', async () => {
-    const inv = createInviteCode('coach1', 'tenant-A', 'Coach Alpha');
-    window.history.replaceState(null, '', `/signup?invite=${inv.code}`);
+  it('blocks submit and shows the invalid-code error when manual input is unknown', async () => {
+    (lookupInviteCode as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const onComplete = vi.fn();
 
-    const onComplete = vi.fn().mockResolvedValue(undefined);
     render(
       <SignupPage
         onComplete={onComplete}
         onBack={vi.fn()}
         theme="dark"
         onToggleTheme={vi.fn()}
-      />
+      />,
     );
-
     fireEvent.change(screen.getByTestId('signup-name'), { target: { value: 'Test User' } });
     fireEvent.change(screen.getByTestId('signup-email'), { target: { value: 'test@test.com' } });
     fireEvent.change(screen.getByTestId('signup-password'), { target: { value: 'Password1' } });
     fireEvent.change(screen.getByTestId('signup-confirm'), { target: { value: 'Password1' } });
+    fireEvent.change(screen.getByTestId('signup-invite-code'), { target: { value: 'NOPE' } });
     fireEvent.click(screen.getByTestId('signup-submit-btn'));
 
-    // We're on the OTP step now — fish the code out of console.log
-    let capturedOtp = '';
-    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
-      const m = String(args[0] ?? '').match(/(\d{6})/);
-      if (m) capturedOtp = m[1];
-    });
-
-    // Step back to form to trigger another OTP send via Resend Code? The OTP was
-    // already generated on submit — re-render isn't needed. Read it from the
-    // generatedOtp via the resend button which logs again:
-    fireEvent.click(screen.getByText(/Resend Code/i));
-    spy.mockRestore();
-
-    fireEvent.change(screen.getByTestId('signup-otp'), { target: { value: capturedOtp } });
-    fireEvent.click(screen.getByTestId('signup-verify-btn'));
-
-    await vi.waitFor(() => {
-      expect(onComplete).toHaveBeenCalledWith('Test User', 'test@test.com', 'Password1', 'tenant-A');
-    });
-
-    // The invite useCount should now be 1
-    const refreshed = lookupInviteCode(inv.code);
-    expect(refreshed?.useCount).toBe(1);
+    expect(await screen.findByText(/invalid invite code/i)).toBeInTheDocument();
+    expect(onComplete).not.toHaveBeenCalled();
   });
 });

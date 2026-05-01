@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Trash2, KeyRound, Archive, Link2, Link as LinkIcon, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Trash2, Archive, Link2, Link as LinkIcon, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProgramEditor } from './ProgramEditor';
 import { cn } from '../../lib/utils';
-import { createDefaultProgram } from '../../constants/mockData';
-import { checkPasswordStrength } from '../../lib/crypto';
 import {
   createInviteCode,
   getInviteCodesForCoach,
@@ -19,17 +17,21 @@ const activeProgramOf = (c: Client | null): Program | null =>
 interface AdminViewProps {
   clients: Client[];
   authenticatedUser: Client;
-  onUpdateClients: (clients: Client[]) => void;
-  onResetPassword: (clientId: string, newPassword: string) => Promise<void>;
-  onArchiveProgram: (clientId: string, programId: string) => void;
+  isLoadingData?: boolean;
+  onSaveProgram: (program: Program) => Promise<void>;
+  onCreateProgram: (clientId: string) => Promise<Program>;
+  onDeleteClient: (clientId: string) => Promise<void>;
+  onArchiveProgram: (clientId: string, programId: string) => Promise<void>;
   onBack: () => void;
 }
 
 export function AdminView({
   clients,
   authenticatedUser,
-  onUpdateClients,
-  onResetPassword,
+  isLoadingData,
+  onSaveProgram,
+  onCreateProgram,
+  onDeleteClient,
   onArchiveProgram,
   onBack,
 }: AdminViewProps) {
@@ -41,13 +43,17 @@ export function AdminView({
   const [selectedClient, setSelectedClient] = useState<Client | null>(trainees[0] ?? null);
   const [editingProgram, setEditingProgram] = useState<Program | null>(activeProgramOf(trainees[0] ?? null));
 
-  // Invite code state
+  // Invite code state — async fetched from Supabase in Phase 3.
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
   const [copied, setCopied] = useState<{ id: string; kind: 'code' | 'link' } | null>(null);
 
   // Load invite codes
   useEffect(() => {
-    setInviteCodes(getInviteCodesForCoach(authenticatedUser.id));
+    let cancelled = false;
+    void getInviteCodesForCoach(authenticatedUser.id).then((codes) => {
+      if (!cancelled) setInviteCodes(codes);
+    });
+    return () => { cancelled = true; };
   }, [authenticatedUser.id]);
 
   // Keep the editing program in sync with the live store after archive/save
@@ -67,69 +73,62 @@ export function AdminView({
     setEditingProgram(activeProgramOf(client));
   };
 
-  const handleCreateProgram = () => {
+  const handleCreateProgram = async () => {
     if (!selectedClient) return;
-    const newProgram = createDefaultProgram(authenticatedUser.tenantId);
-    const updatedClients = clients.map((c) =>
-      c.id === selectedClient.id
-        ? { ...c, programs: [...c.programs, newProgram], activeProgramId: newProgram.id }
-        : c
-    );
-    setEditingProgram(newProgram);
-    onUpdateClients(updatedClients);
+    try {
+      const newProgram = await onCreateProgram(selectedClient.id);
+      setEditingProgram(newProgram);
+    } catch (err) {
+      console.error('[IronTrack admin] createProgram failed', err);
+    }
   };
 
-  const handleArchiveProgram = () => {
+  const handleArchiveProgram = async () => {
     if (!selectedClient || !editingProgram) return;
     if (
       !window.confirm(
-        `Archive "${editingProgram.name}"? It will move to the trainee's history and you can build a new block.`
+        `Archive "${editingProgram.name}"? It will move to the trainee's history and you can build a new block.`,
       )
     ) return;
-    onArchiveProgram(selectedClient.id, editingProgram.id);
-    setEditingProgram(null);
+    try {
+      await onArchiveProgram(selectedClient.id, editingProgram.id);
+      setEditingProgram(null);
+    } catch (err) {
+      console.error('[IronTrack admin] archiveProgram failed', err);
+    }
   };
 
-  const handleResetPassword = async (clientId: string, clientName: string) => {
-    const newPassword = window.prompt(
-      `Enter new password for ${clientName}:\n(min 8 chars, 1 letter, 1 number)`
-    );
-    if (!newPassword) return;
-    const { ok, errors } = checkPasswordStrength(newPassword);
-    if (!ok) { window.alert(`Password too weak:\n${errors.join('\n')}`); return; }
-    await onResetPassword(clientId, newPassword);
-    window.alert(`Password reset for ${clientName}.\nNew password: ${newPassword}`);
-  };
-
-  const handleDeleteClient = (clientId: string) => {
+  const handleDeleteClient = async (clientId: string) => {
     if (!window.confirm('Remove this client and all their data? This cannot be undone.')) return;
-    const remaining = clients.filter((c) => c.id !== clientId);
-    onUpdateClients(remaining);
-    if (selectedClient?.id === clientId) {
-      const nextTrainee = remaining.filter(
-        (c) => c.role === 'trainee' && c.tenantId === authenticatedUser.tenantId
-      )[0] ?? null;
-      setSelectedClient(nextTrainee);
-      setEditingProgram(nextTrainee?.programs[0] ?? null);
+    try {
+      await onDeleteClient(clientId);
+      if (selectedClient?.id === clientId) {
+        const nextTrainee = clients.filter(
+          (c) => c.role === 'trainee' && c.tenantId === authenticatedUser.tenantId && c.id !== clientId,
+        )[0] ?? null;
+        setSelectedClient(nextTrainee);
+        setEditingProgram(nextTrainee ? activeProgramOf(nextTrainee) : null);
+      }
+    } catch (err) {
+      console.error('[IronTrack admin] deleteClient failed', err);
     }
   };
 
   const handleProgramChange = (updated: Program) => {
     if (!selectedClient) return;
-    const updatedClients = clients.map((c) =>
-      c.id === selectedClient.id
-        ? { ...c, programs: c.programs.map((p) => (p.id === updated.id ? updated : p)) }
-        : c
-    );
+    // Optimistic local update so the editor is responsive — onSaveProgram
+    // syncs to Supabase in the background and refetches the canonical tree.
     setEditingProgram(updated);
-    onUpdateClients(updatedClients);
+    void onSaveProgram(updated).catch((err) => {
+      console.error('[IronTrack admin] saveProgram failed', err);
+    });
   };
 
   const [inviteError, setInviteError] = useState<string | null>(null);
 
-  const handleGenerateInvite = () => {
+  const handleGenerateInvite = async () => {
     try {
-      const invite = createInviteCode(
+      const invite = await createInviteCode(
         authenticatedUser.id,
         authenticatedUser.tenantId ?? authenticatedUser.id,
         authenticatedUser.name,
@@ -142,8 +141,8 @@ export function AdminView({
     }
   };
 
-  const handleDeleteInvite = (codeId: string) => {
-    deleteInviteCode(codeId);
+  const handleDeleteInvite = async (codeId: string) => {
+    await deleteInviteCode(codeId);
     setInviteCodes((prev) => prev.filter((c) => c.id !== codeId));
   };
 
@@ -183,7 +182,7 @@ export function AdminView({
             Invite Codes
           </h3>
           <button
-            onClick={handleGenerateInvite}
+            onClick={() => void handleGenerateInvite()}
             data-testid="generate-invite-btn"
             className="btn-press flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-widest border border-border hover:border-accent hover:text-accent rounded-input transition-colors"
           >
@@ -260,7 +259,7 @@ export function AdminView({
                         )}
                       </button>
                       <button
-                        onClick={() => handleDeleteInvite(inv.id)}
+                        onClick={() => void handleDeleteInvite(inv.id)}
                         className="p-1.5 text-muted-foreground hover:text-red-500 transition-colors"
                         title="Delete code"
                       >
@@ -282,6 +281,11 @@ export function AdminView({
             Select Client
           </h3>
           <div className="space-y-3">
+            {isLoadingData && trainees.length === 0 && (
+              <p className="text-xs font-mono text-muted-foreground" data-testid="admin-loading">
+                Loading clients…
+              </p>
+            )}
             {trainees.map((c) => (
               <div key={c.id} className="relative group">
                 <button
@@ -298,15 +302,10 @@ export function AdminView({
                     {c.email}
                   </p>
                 </button>
+                {/* Reset-password is unavailable in Phase 3 (would need a server-side
+                    Supabase admin function). Trainees self-serve via Forgot Password. */}
                 <button
-                  onClick={(e) => { e.stopPropagation(); void handleResetPassword(c.id, c.name); }}
-                  className="absolute top-3 right-11 p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-blue-400 transition-all"
-                  title="Reset password"
-                >
-                  <KeyRound className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDeleteClient(c.id); }}
+                  onClick={(e) => { e.stopPropagation(); void handleDeleteClient(c.id); }}
                   className="absolute top-3 right-3 p-1.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-500 transition-all"
                   title="Remove client"
                 >

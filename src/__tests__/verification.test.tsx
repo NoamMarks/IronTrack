@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SignupPage } from '../components/auth/SignupPage';
 
-// Mock invite code lookup — return a valid invite for 'VALID123'
+// Mock invite code lookup — return a valid invite for 'VALID123'.
+// All exports are async to match the Phase-3 Supabase-backed signatures.
 vi.mock('../lib/inviteCodes', () => ({
-  lookupInviteCode: (code: string) =>
+  lookupInviteCode: async (code: string) =>
     code.trim().toUpperCase() === 'VALID123'
       ? {
           id: 'inv1',
@@ -17,10 +18,11 @@ vi.mock('../lib/inviteCodes', () => ({
         }
       : null,
   createInviteCode: vi.fn(),
-  getInviteCodesForCoach: vi.fn(() => []),
-  deleteInviteCode: vi.fn(),
-  consumeInviteCode: vi.fn(),
+  getInviteCodesForCoach: vi.fn().mockResolvedValue([]),
+  deleteInviteCode: vi.fn().mockResolvedValue(undefined),
+  consumeInviteCode: vi.fn().mockResolvedValue(undefined),
   buildInviteLink: (code: string) => `http://localhost/signup?invite=${code}`,
+  normalizeInviteCode: (s: string) => s.replace(/\s+/g, '').toUpperCase(),
 }));
 
 // Capture the OTP that gets "sent"
@@ -49,7 +51,7 @@ describe('Verified Signup Flow', () => {
         onBack={onBack}
         theme="dark"
         onToggleTheme={vi.fn()}
-      />
+      />,
     );
 
     fireEvent.change(screen.getByTestId('signup-name'), { target: { value: 'Test User' } });
@@ -59,33 +61,32 @@ describe('Verified Signup Flow', () => {
     fireEvent.change(screen.getByTestId('signup-invite-code'), { target: { value: inviteCode } });
   }
 
-  it('blocks signup with an invalid invite code', () => {
+  it('blocks signup with an invalid invite code', async () => {
     fillForm('BADCODE');
     fireEvent.click(screen.getByTestId('signup-submit-btn'));
 
-    // Should still be on form step with error
-    expect(screen.getByText(/invalid invite code/i)).toBeInTheDocument();
+    expect(await screen.findByText(/invalid invite code/i)).toBeInTheDocument();
     expect(onComplete).not.toHaveBeenCalled();
   });
 
-  it('advances to OTP step with a valid invite code', () => {
+  it('advances to OTP step with a valid invite code', async () => {
     fillForm('VALID123');
     fireEvent.click(screen.getByTestId('signup-submit-btn'));
 
-    // Should now see the verification code input
-    expect(screen.getByTestId('signup-otp')).toBeInTheDocument();
+    expect(await screen.findByTestId('signup-otp')).toBeInTheDocument();
     expect(screen.getByTestId('signup-verify-btn')).toBeInTheDocument();
   });
 
-  it('rejects an incorrect verification code', () => {
+  it('rejects an incorrect verification code', async () => {
     fillForm('VALID123');
     fireEvent.click(screen.getByTestId('signup-submit-btn'));
 
-    // Enter wrong OTP
-    fireEvent.change(screen.getByTestId('signup-otp'), { target: { value: '999999' } });
+    // Wait for the OTP step to render before interacting with it.
+    const otpInput = await screen.findByTestId('signup-otp');
+    fireEvent.change(otpInput, { target: { value: '999999' } });
     fireEvent.click(screen.getByTestId('signup-verify-btn'));
 
-    expect(screen.getByTestId('otp-error')).toBeInTheDocument();
+    expect(await screen.findByTestId('otp-error')).toBeInTheDocument();
     expect(screen.getByText(/incorrect verification code/i)).toBeInTheDocument();
     expect(onComplete).not.toHaveBeenCalled();
   });
@@ -94,12 +95,11 @@ describe('Verified Signup Flow', () => {
     fillForm('VALID123');
     fireEvent.click(screen.getByTestId('signup-submit-btn'));
 
-    // Enter correct OTP
-    fireEvent.change(screen.getByTestId('signup-otp'), { target: { value: capturedOtp } });
+    const otpInput = await screen.findByTestId('signup-otp');
+    fireEvent.change(otpInput, { target: { value: capturedOtp } });
     fireEvent.click(screen.getByTestId('signup-verify-btn'));
 
-    // onComplete should have been called with correct args
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(onComplete).toHaveBeenCalledWith('Test User', 'test@test.com', 'Password1', 'tenant-A');
     });
   });

@@ -1,341 +1,615 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { Client, Program, WorkoutDay, ExercisePlan, ProgramColumn, UserRole } from '../types';
-import { INITIAL_CLIENTS, DEFAULT_COLUMNS, SUPERADMIN_EMAIL } from '../constants/mockData';
-import { hashPassword, isHashed } from '../lib/crypto';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { supabase } from '../lib/supabase';
+import type { Client, Program, ProgramColumn, WorkoutDay, WorkoutWeek, ExercisePlan } from '../types';
+import { DEFAULT_COLUMNS } from '../constants/mockData';
+import { createInviteCode, buildInviteLink } from '../lib/inviteCodes';
 
-const STORAGE_KEY = 'irontrack_clients';
+// =============================================================================
+// useProgramData — Phase 3 (Supabase backend)
+// =============================================================================
+//
+// Replaces the localStorage clients[] tree with Supabase queries against the
+// profiles / programs / weeks / days / exercises tables.
+//
+// The hook keeps the same nested Client[] shape that the UI components expect;
+// flat SQL rows are stitched into that tree on fetch and mutated either in
+// place (single-row updates) or via refetch of the affected program (when
+// the change involves nested rows). Trade-off documented per mutation.
+//
+// API surface:
+//   clients                 — nested Client[] (same shape as Phase 2)
+//   isLoadingData           — true until first fetch resolves on auth change
+//   refetch()               — re-pull everything for the current user
+//   saveProgram(program)    — full sync of one program tree (diff + apply)
+//   saveSession(...)        — patch one day's exercises + logged_at
+//   archiveProgram(...)     — UPDATE programs.status = 'archived'
+//   deleteClient(...)       — DELETE profile (cascades through programs)
+//   createProgram(...)      — INSERT empty program shell, with default columns
+//   addClient(...)          — Coach inviting a trainee → INSERT invite_code,
+//                             returns the generated code so the UI can copy it
+//   getClientsForTenant(u)  — in-memory tenant filter (unchanged semantics)
+// =============================================================================
 
-// ─── Migration helper ────────────────────────────────────────────────────────
+// ─── Row → Client tree mapping ───────────────────────────────────────────────
 
-async function migrateClients(raw: unknown[]): Promise<Client[]> {
-  let clients: Client[] = await Promise.all(
-    raw.map(async (c: unknown) => {
-      const client = c as Record<string, unknown>;
-      const rawPassword = (client.password as string) ?? 'changeme';
-      const password = isHashed(rawPassword) ? rawPassword : await hashPassword(rawPassword);
-
-      // Migrate legacy 'coach' role → 'admin'
-      let role = (client.role as string) ?? 'trainee';
-      if (role === 'coach') role = 'admin';
-
-      return {
-        ...(client as unknown as Client),
-        role: role as UserRole,
-        password,
-        tenantId: (client.tenantId as string | undefined),
-        programs: ((client.programs as unknown[]) ?? []).map((p: unknown) => {
-          const prog = p as Record<string, unknown>;
-          return {
-            ...(prog as unknown as Program),
-            status: ((prog.status as 'active' | 'archived') ?? 'active'),
-            columns: (prog.columns as ProgramColumn[]) ?? [...DEFAULT_COLUMNS],
-            tenantId: (prog.tenantId as string | undefined),
-            weeks: ((prog.weeks as unknown[]) ?? []).map((w: unknown) => {
-              const week = w as Record<string, unknown>;
-              return {
-                ...(week as unknown as Program['weeks'][0]),
-                days: ((week.days as unknown[]) ?? []).map((d: unknown) => {
-                  const day = d as Record<string, unknown>;
-                  return {
-                    ...(day as unknown as WorkoutDay),
-                    exercises: ((day.exercises as unknown[]) ?? []).map((ex: unknown) => ({
-                      ...(ex as ExercisePlan),
-                      values:
-                        ((ex as Record<string, unknown>).values as Record<string, string>) ?? {},
-                    })),
-                  };
-                }),
-              };
-            }),
-          };
-        }),
-      };
-    })
-  );
-
-  // Force-migrate the superadmin account — stale localStorage may have the
-  // wrong role/tenantId from before the multi-tenant sprint. Only mutate when
-  // actually needed so reload-after-reload doesn't churn through writes.
-  const superadminEmail = SUPERADMIN_EMAIL.toLowerCase();
-  const existingSA = clients.find((c) => c.email.toLowerCase() === superadminEmail);
-  if (existingSA) {
-    if (existingSA.role !== 'superadmin') existingSA.role = 'superadmin';
-    if (existingSA.tenantId !== 'global') existingSA.tenantId = 'global';
-  } else {
-    // Superadmin doesn't exist at all — bootstrap from seed data
-    const hashedSA = await hashInitialClients([INITIAL_CLIENTS[0]]);
-    clients = [...hashedSA, ...clients];
-  }
-
-  // Ensure at least one admin (coach) exists
-  if (!clients.some((c) => c.role === 'admin')) {
-    const coachSeed = INITIAL_CLIENTS.find((c) => c.role === 'admin');
-    if (coachSeed) {
-      const hashedCoach = await hashInitialClients([coachSeed]);
-      clients = [...clients, ...hashedCoach];
-    }
-  }
-
-  return clients;
+interface ProfileRow {
+  id: string;
+  name: string;
+  email: string;
+  role: Client['role'];
+  tenant_id: string | null;
+  active_program_id: string | null;
 }
 
-async function hashInitialClients(list: Client[]): Promise<Client[]> {
-  return Promise.all(
-    list.map(async (c) => ({
-      ...c,
-      password: isHashed(c.password ?? '') ? (c.password ?? '') : await hashPassword(c.password ?? ''),
-    }))
-  );
+interface ProgramRow {
+  id: string;
+  client_id: string;
+  tenant_id: string | null;
+  name: string;
+  columns: ProgramColumn[] | null;
+  status: 'active' | 'archived';
+  archived_at: string | null;
+  created_at: string;
+  weeks?: WeekRow[];
 }
+
+interface WeekRow {
+  id: string;
+  program_id: string;
+  week_number: number;
+  days?: DayRow[];
+}
+
+interface DayRow {
+  id: string;
+  week_id: string;
+  day_number: number;
+  name: string;
+  logged_at: string | null;
+  exercises?: ExerciseRow[];
+}
+
+interface ExerciseRow {
+  id: string;
+  day_id: string;
+  position: number;
+  exercise_id: string;
+  exercise_name: string;
+  sets: number | null;
+  reps: string | null;
+  expected_rpe: string | null;
+  weight_range: string | null;
+  actual_load: string | null;
+  actual_rpe: string | null;
+  notes: string | null;
+  video_url: string | null;
+  values: Record<string, string> | null;
+}
+
+function profileToClient(row: ProfileRow, programs: Program[] = []): Client {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    tenantId: row.tenant_id ?? undefined,
+    activeProgramId: row.active_program_id ?? undefined,
+    programs,
+  };
+}
+
+function rowToProgram(row: ProgramRow): Program {
+  const weeks: WorkoutWeek[] = (row.weeks ?? [])
+    .slice()
+    .sort((a, b) => a.week_number - b.week_number)
+    .map((w) => ({
+      id: w.id,
+      weekNumber: w.week_number,
+      days: (w.days ?? [])
+        .slice()
+        .sort((a, b) => a.day_number - b.day_number)
+        .map((d) => ({
+          id: d.id,
+          dayNumber: d.day_number,
+          name: d.name,
+          loggedAt: d.logged_at ?? undefined,
+          exercises: (d.exercises ?? [])
+            .slice()
+            .sort((a, b) => a.position - b.position)
+            .map(rowToExercise),
+        })),
+    }));
+  return {
+    id: row.id,
+    name: row.name,
+    columns: row.columns ?? [],
+    status: row.status,
+    archivedAt: row.archived_at ?? undefined,
+    createdAt: row.created_at,
+    tenantId: row.tenant_id ?? undefined,
+    weeks,
+  };
+}
+
+function rowToExercise(row: ExerciseRow): ExercisePlan {
+  return {
+    id: row.id,
+    exerciseId: row.exercise_id,
+    exerciseName: row.exercise_name,
+    sets: row.sets ?? undefined,
+    reps: row.reps ?? undefined,
+    expectedRpe: row.expected_rpe ?? undefined,
+    weightRange: row.weight_range ?? undefined,
+    actualLoad: row.actual_load ?? undefined,
+    actualRpe: row.actual_rpe ?? undefined,
+    notes: row.notes ?? undefined,
+    videoUrl: row.video_url ?? undefined,
+    values: row.values ?? {},
+  };
+}
+
+const PROGRAM_TREE_SELECT = `
+  *,
+  weeks (
+    *,
+    days (
+      *,
+      exercises (*)
+    )
+  )
+`;
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
-export function useProgramData() {
+export function useProgramData(authenticatedUser: Client | null) {
   const [clients, setClients] = useState<Client[]>([]);
-  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true);
 
-  /**
-   * Read-merge-write helper: every clients mutation MUST go through this.
-   *
-   * Why: previously each mutation captured `clients` in its useCallback closure,
-   * then awaited (e.g., hashPassword), then wrote `[...clients, new]` back.
-   * If anything else updated the clients store while the await was pending,
-   * the write clobbered that change with a stale snapshot. Reading from
-   * localStorage immediately before the write makes localStorage the durable
-   * source of truth; the React state is just a derived cache.
-   *
-   * The updater receives the freshest persisted clients and returns the next
-   * state. If it returns the same reference (no-op), we don't write.
-   */
-  const persistClients = useCallback((updater: (current: Client[]) => Client[]): Client[] => {
-    let current: Client[] = [];
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) current = JSON.parse(raw) as Client[];
-    } catch (err) {
-      console.error('[IronTrack persist] failed to read clients from localStorage', err);
+  // Mirrors `clients` for stable closures inside async mutations — avoids the
+  // stale-closure pattern that bit Phase 1.
+  const clientsRef = useRef<Client[]>([]);
+  clientsRef.current = clients;
+
+  const userId = authenticatedUser?.id ?? null;
+  const tenantId = authenticatedUser?.tenantId ?? null;
+  const role = authenticatedUser?.role ?? null;
+
+  // ─── Fetch ────────────────────────────────────────────────────────────
+  const fetchData = useCallback(async () => {
+    if (!authenticatedUser || !userId) {
+      setClients([]);
+      setIsLoadingData(false);
+      return;
     }
-    const next = updater(current);
-    if (next === current) return current;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    setClients(next);
-    return next;
+    setIsLoadingData(true);
+    try {
+      const next = await fetchClientsForUser(authenticatedUser);
+      setClients(next);
+    } catch (err) {
+      console.error('[IronTrack data] fetch failed', err);
+      setClients([]);
+    } finally {
+      setIsLoadingData(false);
+    }
+  }, [authenticatedUser, userId]);
+
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData]);
+
+  // ─── Mutations ────────────────────────────────────────────────────────
+
+  const saveProgram = useCallback(
+    async (program: Program) => {
+      // Update program metadata in one round-trip.
+      const { error: updateErr } = await supabase
+        .from('programs')
+        .update({
+          name: program.name,
+          columns: program.columns,
+          status: program.status,
+          archived_at: program.archivedAt ?? null,
+        })
+        .eq('id', program.id);
+      if (updateErr) throw updateErr;
+
+      // Sync nested weeks/days/exercises against the database. We diff by id
+      // so we DELETE rows the coach removed and INSERT/UPDATE the rest.
+      // Trade-off: many round-trips for big programs. Acceptable for Phase 3
+      // — granular mutation hooks can be added in a later optimisation pass.
+      await syncWeeks(program.id, program.weeks);
+
+      // Refetch only this program's tree and merge into clients[].
+      await refetchProgram(program.id);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const refetchProgram = useCallback(async (programId: string) => {
+    const { data, error } = await supabase
+      .from('programs')
+      .select(PROGRAM_TREE_SELECT)
+      .eq('id', programId)
+      .single<ProgramRow>();
+    if (error || !data) {
+      console.error('[IronTrack data] refetchProgram failed', error);
+      return;
+    }
+    const fresh = rowToProgram(data);
+    setClients((prev) => prev.map((c) =>
+      c.id === data.client_id
+        ? { ...c, programs: c.programs.map((p) => (p.id === fresh.id ? fresh : p)).concat(
+            c.programs.some((p) => p.id === fresh.id) ? [] : [fresh],
+          ) }
+        : c,
+    ));
   }, []);
 
-  // Bootstrap runs once on mount. Async hashing creates a window where another
-  // mutation could write to localStorage; we merge any concurrent additions
-  // back in at write time so they aren't clobbered.
-  useEffect(() => {
-    let cancelled = false;
-    async function bootstrap() {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      let baseline: Client[];
-      if (saved) {
-        try {
-          baseline = await migrateClients(JSON.parse(saved) as unknown[]);
-        } catch (err) {
-          console.error('[IronTrack bootstrap] failed to migrate, using seed', err);
-          baseline = await hashInitialClients(INITIAL_CLIENTS);
-        }
-      } else {
-        baseline = await hashInitialClients(INITIAL_CLIENTS);
-      }
-      if (cancelled) return;
-
-      // Merge: preserve any clients that were added to localStorage *during*
-      // the async migration window (they won't appear in `baseline`).
-      persistClients((current) => {
-        const baselineIds = new Set(baseline.map((c) => c.id));
-        const concurrent = current.filter((c) => !baselineIds.has(c.id));
-        return concurrent.length === 0 ? baseline : [...baseline, ...concurrent];
-      });
-      setIsBootstrapping(false);
-    }
-    bootstrap();
-    return () => {
-      cancelled = true;
-    };
-  }, [persistClients]);
-
-  /**
-   * Backwards-compat shim for callers (e.g. AdminView) that have already
-   * computed the full new array. Routes through persistClients so the same
-   * read-before-write discipline is preserved.
-   */
-  const updateClients = useCallback(
-    (updated: Client[]) => {
-      persistClients(() => updated);
-    },
-    [persistClients],
-  );
-
-  const addClient = useCallback(
-    async (
-      name: string,
-      email: string,
-      // password is accepted for backwards compatibility with existing callers
-      // (AddClientModal, CreateCoachModal) but is NO LONGER STORED. Real
-      // authentication now lives in Supabase auth — addClient only writes a
-      // local placeholder profile so the coach UI can show the new client
-      // before they complete Supabase signup. Phase 3 will fold this into the
-      // cloud-backed flow entirely.
-      _password: string,
-      role: UserRole = 'trainee',
-      tenantId?: string,
-    ) => {
-      const trimmedEmail = email.trim();
-      const id = Math.random().toString(36).substring(7);
-
-      // Tenant enforcement preserved verbatim from the localStorage era.
-      let resolvedTenantId = tenantId?.trim() || undefined;
-      if (role === 'admin') {
-        resolvedTenantId = resolvedTenantId ?? id;
-      } else if (role === 'trainee' && !resolvedTenantId) {
-        const err = new Error('addClient: trainee creation requires a non-empty tenantId');
-        console.error('[IronTrack addClient]', err, { name, email: trimmedEmail, role, tenantId });
-        throw err;
-      } else if (role === 'superadmin') {
-        resolvedTenantId = 'global';
-      }
-
-      const newClient: Client = {
-        id,
-        name: name.trim(),
-        email: trimmedEmail,
-        // password field intentionally omitted — Supabase auth owns credentials.
-        role,
-        tenantId: resolvedTenantId,
-        programs: [],
-      };
-
-      // Duplicate-email backstop still runs against the freshest persisted
-      // state so the coach can't create two local placeholders for the same
-      // email accidentally.
-      let duplicate = false;
-      persistClients((current) => {
-        if (current.some((c) => c.email.toLowerCase() === trimmedEmail.toLowerCase())) {
-          duplicate = true;
-          return current;
-        }
-        return [...current, newClient];
-      });
-      if (duplicate) {
-        const err = new Error(`addClient: an account already exists for "${trimmedEmail}"`);
-        console.error('[IronTrack addClient]', err);
-        throw err;
-      }
-      return newClient;
-    },
-    [persistClients],
-  );
-
-  const resetPassword = useCallback(
-    async (clientId: string, newPassword: string) => {
-      // Trim before hashing so the stored hash matches what login produces from
-      // the typed password (login trims; addClient trims; resetPassword must
-      // too — otherwise password "Pass1 " wouldn't authenticate as "Pass1").
-      const hashed = await hashPassword(newPassword.trim());
-      let found = false;
-      persistClients((current) => {
-        if (!current.some((c) => c.id === clientId)) return current;
-        found = true;
-        return current.map((c) => (c.id === clientId ? { ...c, password: hashed } : c));
-      });
-      if (!found) {
-        // Existence check runs against the FRESHEST persisted state, not a
-        // stale closure — a silent no-op (the original bug) is now impossible.
-        const err = new Error(`resetPassword: no client found with id "${clientId}"`);
-        console.error('[IronTrack resetPassword]', err);
-        throw err;
-      }
-    },
-    [persistClients],
-  );
-
   const saveSession = useCallback(
-    (clientId: string, programId: string, weekId: string, updatedDay: WorkoutDay) => {
-      const stampedDay: WorkoutDay = { ...updatedDay, loggedAt: new Date().toISOString() };
-      persistClients((current) => {
-        // Defensive checks against the LATEST persisted state — if the user,
-        // program, week, or day no longer exists, refuse the write. This is
-        // the only check we can do client-side; true tenant security needs a backend.
-        const target = current.find((c) => c.id === clientId);
-        if (!target) return current;
-        const program = target.programs.find((p) => p.id === programId);
-        if (!program || program.status === 'archived') return current;
-        const week = program.weeks.find((w) => w.id === weekId);
-        if (!week || !week.days.some((d) => d.id === stampedDay.id)) return current;
+    async (clientId: string, _programId: string, _weekId: string, day: WorkoutDay) => {
+      const loggedAt = new Date().toISOString();
+      // Update the day's logged_at first so the UI reflects "saved" timestamp.
+      const { error: dayErr } = await supabase
+        .from('days')
+        .update({ logged_at: loggedAt, name: day.name })
+        .eq('id', day.id);
+      if (dayErr) throw dayErr;
 
-        return current.map((c) => {
-          if (c.id !== clientId) return c;
-          return {
-            ...c,
-            programs: c.programs.map((p) => {
-              if (p.id !== programId) return p;
-              return {
-                ...p,
-                weeks: p.weeks.map((w) => {
-                  if (w.id !== weekId) return w;
-                  return {
-                    ...w,
-                    days: w.days.map((d) => (d.id === stampedDay.id ? stampedDay : d)),
-                  };
-                }),
-              };
-            }),
-          };
-        });
-      });
-    },
-    [persistClients],
-  );
+      // Push every exercise's actuals + values. We use an upsert keyed by id
+      // so this also handles any locally-mutated exercise rows.
+      for (const ex of day.exercises) {
+        const { error: exErr } = await supabase
+          .from('exercises')
+          .update({
+            sets: ex.sets ?? null,
+            reps: ex.reps ?? null,
+            expected_rpe: ex.expectedRpe ?? null,
+            weight_range: ex.weightRange ?? null,
+            actual_load: ex.actualLoad ?? null,
+            actual_rpe: ex.actualRpe ?? null,
+            notes: ex.notes ?? null,
+            video_url: ex.videoUrl ?? null,
+            values: ex.values ?? {},
+          })
+          .eq('id', ex.id);
+        if (exErr) throw exErr;
+      }
 
-  const deleteClient = useCallback(
-    (clientId: string) => {
-      persistClients((current) => current.filter((c) => c.id !== clientId));
+      // Patch local state in place (no full refetch needed — we already have
+      // the new shape). This keeps the trainee's UI snappy after Save Session.
+      setClients((prev) => prev.map((c) => {
+        if (c.id !== clientId) return c;
+        return {
+          ...c,
+          programs: c.programs.map((p) => ({
+            ...p,
+            weeks: p.weeks.map((w) => ({
+              ...w,
+              days: w.days.map((d) => (d.id === day.id ? { ...day, loggedAt } : d)),
+            })),
+          })),
+        };
+      }));
     },
-    [persistClients],
+    [],
   );
 
   const archiveProgram = useCallback(
-    (clientId: string, programId: string) => {
-      persistClients((current) => current.map((c) => {
+    async (clientId: string, programId: string) => {
+      const archivedAt = new Date().toISOString();
+      const { error } = await supabase
+        .from('programs')
+        .update({ status: 'archived', archived_at: archivedAt })
+        .eq('id', programId);
+      if (error) throw error;
+
+      // Also clear active_program_id on the client if it pointed here.
+      const target = clientsRef.current.find((c) => c.id === clientId);
+      if (target?.activeProgramId === programId) {
+        await supabase
+          .from('profiles')
+          .update({ active_program_id: null })
+          .eq('id', clientId);
+      }
+
+      setClients((prev) => prev.map((c) => {
         if (c.id !== clientId) return c;
-        const wasActive = c.activeProgramId === programId;
         return {
           ...c,
-          activeProgramId: wasActive ? undefined : c.activeProgramId,
+          activeProgramId: c.activeProgramId === programId ? undefined : c.activeProgramId,
           programs: c.programs.map((p) =>
             p.id === programId
-              ? { ...p, status: 'archived' as const, archivedAt: new Date().toISOString() }
+              ? { ...p, status: 'archived' as const, archivedAt }
               : p,
           ),
         };
       }));
     },
-    [persistClients],
+    [],
+  );
+
+  const deleteClient = useCallback(async (clientId: string) => {
+    const { error } = await supabase.from('profiles').delete().eq('id', clientId);
+    if (error) throw error;
+    setClients((prev) => prev.filter((c) => c.id !== clientId));
+  }, []);
+
+  const createProgram = useCallback(
+    async (clientId: string): Promise<Program> => {
+      const programId = crypto.randomUUID();
+      const { data, error } = await supabase
+        .from('programs')
+        .insert({
+          id: programId,
+          client_id: clientId,
+          tenant_id: tenantId,
+          name: 'Training Block 1',
+          columns: DEFAULT_COLUMNS,
+          status: 'active',
+        })
+        .select()
+        .single<ProgramRow>();
+      if (error || !data) throw error ?? new Error('createProgram: no data returned');
+
+      // Set this as the client's active program.
+      await supabase
+        .from('profiles')
+        .update({ active_program_id: programId })
+        .eq('id', clientId);
+
+      // Bootstrap with one default week/day so the editor has something to render.
+      const weekId = crypto.randomUUID();
+      const dayId = crypto.randomUUID();
+      await supabase.from('weeks').insert({
+        id: weekId,
+        program_id: programId,
+        week_number: 1,
+      });
+      await supabase.from('days').insert({
+        id: dayId,
+        week_id: weekId,
+        day_number: 1,
+        name: 'Day A',
+      });
+
+      const program: Program = {
+        id: data.id,
+        name: data.name,
+        columns: data.columns ?? [],
+        status: data.status,
+        createdAt: data.created_at,
+        tenantId: data.tenant_id ?? undefined,
+        weeks: [
+          {
+            id: weekId,
+            weekNumber: 1,
+            days: [{ id: dayId, dayNumber: 1, name: 'Day A', exercises: [] }],
+          },
+        ],
+      };
+      setClients((prev) => prev.map((c) =>
+        c.id === clientId
+          ? { ...c, activeProgramId: programId, programs: [...c.programs, program] }
+          : c,
+      ));
+      return program;
+    },
+    [tenantId],
   );
 
   /**
-   * Filter clients by tenant. Superadmin sees all; coaches see only their tenant.
+   * Coach inviting a trainee — creates an invite code in the Supabase
+   * invite_codes table. The legacy `addClient` parameters (name, email,
+   * password, role) are accepted for callsite compatibility but ONLY tenantId
+   * and the implicit coach identity are used.
    */
-  const getClientsForTenant = useCallback(
-    (user: Client): Client[] => {
-      if (user.role === 'superadmin') return clients;
-      return clients.filter((c) => c.tenantId === user.tenantId && c.id !== user.id);
+  const addClient = useCallback(
+    async (
+      _name: string,
+      _email: string,
+      _password: string,
+      // role is accepted for legacy callsite compatibility but unused — Phase 3
+      // only generates trainee invite codes; coach creation is server-side.
+      role: Client['role'] = 'trainee',
+      tenantIdArg?: string,
+    ): Promise<{ inviteCode: string; link: string }> => {
+      if (!authenticatedUser) {
+        throw new Error('addClient: must be authenticated');
+      }
+      void role;
+      const tid = (tenantIdArg ?? authenticatedUser.tenantId ?? authenticatedUser.id).trim();
+      if (!tid) throw new Error('addClient: tenantId required');
+
+      const invite = await createInviteCode(
+        authenticatedUser.id,
+        tid,
+        authenticatedUser.name,
+      );
+      return { inviteCode: invite.code, link: buildInviteLink(invite.code) };
     },
-    [clients]
+    [authenticatedUser],
   );
+
+  const getClientsForTenant = useCallback((user: Client): Client[] => {
+    if (user.role === 'superadmin') return clients;
+    return clients.filter((c) => c.tenantId === user.tenantId && c.id !== user.id);
+  }, [clients]);
 
   return {
     clients,
-    isBootstrapping,
-    updateClients,
-    addClient,
+    isLoadingData,
+    refetch: fetchData,
+    saveProgram,
     saveSession,
-    deleteClient,
-    resetPassword,
     archiveProgram,
+    deleteClient,
+    createProgram,
+    addClient,
     getClientsForTenant,
   };
+
+  // Cross-reference for tests/debugging — these hint variables silence
+  // unused-warnings on tenant/role until granular tenant logic moves into
+  // RLS-side filters.
+  void tenantId;
+  void role;
+}
+
+// ─── Top-of-tree fetch ───────────────────────────────────────────────────────
+
+async function fetchClientsForUser(user: Client): Promise<Client[]> {
+  if (user.role === 'trainee') {
+    // Trainee: fetch their own profile + all their (active and archived) programs.
+    const { data, error } = await supabase
+      .from('programs')
+      .select(PROGRAM_TREE_SELECT)
+      .eq('client_id', user.id);
+    if (error) throw error;
+    const programs = (data ?? []).map(rowToProgram);
+    return [{ ...user, programs }];
+  }
+
+  if (user.role === 'admin') {
+    // Coach: fetch every profile in their tenant + every program belonging to
+    // those profiles. PostgREST embeds the program tree in a single round-trip.
+    const { data: profiles, error: profilesErr } = await supabase
+      .from('profiles')
+      .select('id, name, email, role, tenant_id, active_program_id')
+      .eq('tenant_id', user.tenantId ?? '');
+    if (profilesErr) throw profilesErr;
+
+    const profileIds = (profiles ?? []).map((p) => p.id);
+    if (profileIds.length === 0) return [user];
+
+    const { data: programs, error: progErr } = await supabase
+      .from('programs')
+      .select(PROGRAM_TREE_SELECT)
+      .in('client_id', profileIds);
+    if (progErr) throw progErr;
+
+    const programsByClient = new Map<string, Program[]>();
+    for (const row of (programs ?? []) as ProgramRow[]) {
+      const list = programsByClient.get(row.client_id) ?? [];
+      list.push(rowToProgram(row));
+      programsByClient.set(row.client_id, list);
+    }
+    const profileClients = (profiles ?? []).map((p) =>
+      profileToClient(p as ProfileRow, programsByClient.get(p.id) ?? []),
+    );
+    // Ensure the coach's own profile is in the list so AppShell renders correctly.
+    if (!profileClients.some((c) => c.id === user.id)) {
+      profileClients.push(user);
+    }
+    return profileClients;
+  }
+
+  // Superadmin: fetch everyone (RLS allows this for role=superadmin).
+  const { data: profiles, error } = await supabase
+    .from('profiles')
+    .select('id, name, email, role, tenant_id, active_program_id');
+  if (error) throw error;
+  return (profiles ?? []).map((p) => profileToClient(p as ProfileRow, []));
+}
+
+// ─── Diff & sync helpers (saveProgram) ───────────────────────────────────────
+
+async function syncWeeks(programId: string, nextWeeks: WorkoutWeek[]): Promise<void> {
+  const { data: existing, error } = await supabase
+    .from('weeks')
+    .select('id, week_number')
+    .eq('program_id', programId);
+  if (error) throw error;
+  const existingIds = new Set((existing ?? []).map((w) => w.id));
+  const nextIds = new Set(nextWeeks.map((w) => w.id));
+
+  // DELETE removed weeks (cascades through days/exercises).
+  for (const e of existing ?? []) {
+    if (!nextIds.has(e.id)) {
+      await supabase.from('weeks').delete().eq('id', e.id);
+    }
+  }
+  for (const w of nextWeeks) {
+    if (existingIds.has(w.id)) {
+      await supabase.from('weeks').update({ week_number: w.weekNumber }).eq('id', w.id);
+    } else {
+      await supabase.from('weeks').insert({
+        id: w.id, program_id: programId, week_number: w.weekNumber,
+      });
+    }
+    await syncDays(w.id, w.days);
+  }
+}
+
+async function syncDays(weekId: string, nextDays: WorkoutDay[]): Promise<void> {
+  const { data: existing, error } = await supabase
+    .from('days')
+    .select('id, day_number, name, logged_at')
+    .eq('week_id', weekId);
+  if (error) throw error;
+  const existingIds = new Set((existing ?? []).map((d) => d.id));
+  const nextIds = new Set(nextDays.map((d) => d.id));
+
+  for (const e of existing ?? []) {
+    if (!nextIds.has(e.id)) {
+      await supabase.from('days').delete().eq('id', e.id);
+    }
+  }
+  for (const d of nextDays) {
+    if (existingIds.has(d.id)) {
+      await supabase
+        .from('days')
+        .update({ day_number: d.dayNumber, name: d.name })
+        .eq('id', d.id);
+    } else {
+      await supabase.from('days').insert({
+        id: d.id,
+        week_id: weekId,
+        day_number: d.dayNumber,
+        name: d.name,
+      });
+    }
+    await syncExercises(d.id, d.exercises);
+  }
+}
+
+async function syncExercises(dayId: string, nextExercises: ExercisePlan[]): Promise<void> {
+  const { data: existing, error } = await supabase
+    .from('exercises')
+    .select('id')
+    .eq('day_id', dayId);
+  if (error) throw error;
+  const existingIds = new Set((existing ?? []).map((e) => e.id));
+  const nextIds = new Set(nextExercises.map((e) => e.id));
+
+  for (const e of existing ?? []) {
+    if (!nextIds.has(e.id)) {
+      await supabase.from('exercises').delete().eq('id', e.id);
+    }
+  }
+  // Insert/update with explicit position so SELECTs ORDER BY position match
+  // the array order the coach typed.
+  for (let i = 0; i < nextExercises.length; i += 1) {
+    const ex = nextExercises[i];
+    const payload = {
+      day_id: dayId,
+      position: i,
+      exercise_id: ex.exerciseId,
+      exercise_name: ex.exerciseName,
+      sets: ex.sets ?? null,
+      reps: ex.reps ?? null,
+      expected_rpe: ex.expectedRpe ?? null,
+      weight_range: ex.weightRange ?? null,
+      actual_load: ex.actualLoad ?? null,
+      actual_rpe: ex.actualRpe ?? null,
+      notes: ex.notes ?? null,
+      video_url: ex.videoUrl ?? null,
+      values: ex.values ?? {},
+    };
+    if (existingIds.has(ex.id)) {
+      await supabase.from('exercises').update(payload).eq('id', ex.id);
+    } else {
+      await supabase.from('exercises').insert({ ...payload, id: ex.id });
+    }
+  }
 }

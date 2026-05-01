@@ -57,18 +57,19 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
     const normalized = normalizeInviteCode(raw);
     setLinkInviteRaw(raw);
     setInviteCode(normalized);
-    const looked = lookupInviteCode(normalized);
-    if (looked) {
-      setPrefilledInvite(looked);
-    } else {
-      setLinkInviteInvalid(true);
-    }
+    let cancelled = false;
+    void lookupInviteCode(normalized).then((looked) => {
+      if (cancelled) return;
+      if (looked) setPrefilledInvite(looked);
+      else setLinkInviteInvalid(true);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   // True when this signup arrived via a magic link (locks the field even if invalid).
   const isMagicLink = linkInviteRaw !== '';
 
-  const handleSubmitForm = () => {
+  const handleSubmitForm = async () => {
     const errs: string[] = [];
     if (!name.trim()) errs.push('Name is required.');
     if (!email.trim()) errs.push('Email is required.');
@@ -86,8 +87,8 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
       errs.push('An account with this email already exists.');
     }
 
-    // Validate invite code
-    const invite = lookupInviteCode(inviteCode);
+    // Validate invite code (now async — Supabase lookup)
+    const invite = await lookupInviteCode(inviteCode);
     if (!invite) {
       errs.push('Invalid invite code. Please check with your coach.');
     } else if (!invite.tenantId || !invite.tenantId.trim()) {
@@ -119,7 +120,7 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
       await onComplete(name.trim(), email.trim(), password, resolvedTenantId);
       // Only consume the invite once the account creation succeeded — if onComplete
       // throws we leave the use count alone.
-      consumeInviteCode(inviteCode.trim());
+      await consumeInviteCode(inviteCode.trim());
     } catch (err) {
       // Surface the failure inline. The previous code had try/finally with no
       // catch, which let exceptions propagate as unhandled rejections — the
@@ -246,7 +247,7 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
                   )}
 
                   <button
-                    onClick={handleSubmitForm}
+                    onClick={() => void handleSubmitForm()}
                     data-testid="signup-submit-btn"
                     className="btn-press w-full bg-foreground text-background py-4 text-xs font-bold uppercase tracking-widest rounded-input hover:opacity-90 shadow-lg"
                   >
