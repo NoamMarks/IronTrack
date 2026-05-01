@@ -137,9 +137,20 @@ export function consumeInviteCode(code: string): void {
   saveCodes(codes);
 }
 
-/** Build the shareable signup URL for a given invite code. */
+/**
+ * Build the shareable signup URL for a given invite code.
+ *
+ * Prefers the build-time `VITE_PUBLIC_URL` env var so locally generated links
+ * point at the production domain instead of `localhost:5173`. Falls back to
+ * `window.location.origin` when the env var is unset (e.g. during tests or
+ * when the deployer hasn't configured one).
+ */
 export function buildInviteLink(code: string): string {
-  return `${window.location.origin}/signup?invite=${encodeURIComponent(code)}`;
+  const envUrl = (import.meta.env.VITE_PUBLIC_URL as string | undefined)?.trim();
+  const baseUrl = envUrl && envUrl.length > 0
+    ? envUrl.replace(/\/+$/, '') // strip trailing slashes for clean concatenation
+    : window.location.origin;
+  return `${baseUrl}/signup?invite=${encodeURIComponent(code)}`;
 }
 
 /** Delete an invite code. */
