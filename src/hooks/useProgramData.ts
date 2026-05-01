@@ -204,7 +204,21 @@ export function useProgramData() {
       };
       // Append to whatever's actually in localStorage right now, NOT to the
       // closure copy of `clients`. This is the core stale-closure fix.
-      persistClients((current) => [...current, newClient]);
+      // Duplicate-email backstop runs INSIDE the updater so the check sees
+      // the freshest persisted state — never a stale React snapshot.
+      let duplicate = false;
+      persistClients((current) => {
+        if (current.some((c) => c.email.toLowerCase() === trimmedEmail.toLowerCase())) {
+          duplicate = true;
+          return current; // no-op write
+        }
+        return [...current, newClient];
+      });
+      if (duplicate) {
+        const err = new Error(`addClient: an account already exists for "${trimmedEmail}"`);
+        console.error('[IronTrack addClient]', err);
+        throw err;
+      }
       return newClient;
     },
     [persistClients],

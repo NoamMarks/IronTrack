@@ -330,12 +330,15 @@ describe('Phase 1G: RestTimer panel + presets', () => {
     expect(screen.getByTestId('timer-display')).toHaveTextContent('0:00');
   });
 
-  it('closes the panel when ESC is pressed', () => {
+  it('closes the panel when ESC is pressed', async () => {
     render(<RestTimer />);
     fireEvent.click(screen.getByTestId('rest-timer-fab'));
     expect(screen.getByTestId('rest-timer-panel')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByTestId('rest-timer-panel')).toBeNull();
+    // AnimatePresence unmounts after the exit animation; poll until it does
+    await waitFor(() => {
+      expect(screen.queryByTestId('rest-timer-panel')).toBeNull();
+    });
   });
 });
 

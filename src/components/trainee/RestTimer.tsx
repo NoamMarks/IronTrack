@@ -125,6 +125,16 @@ export function RestTimer() {
     return () => { recognitionRef.current?.stop(); };
   }, []);
 
+  // ── ESC closes the floating panel ──────────────────────────────────────
+  useEffect(() => {
+    if (!isExpanded) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsExpanded(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isExpanded]);
+
   // ── Format ─────────────────────────────────────────────────────────────
 
   const mins = Math.floor(remaining / 60);

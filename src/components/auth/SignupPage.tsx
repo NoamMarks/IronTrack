@@ -14,11 +14,14 @@ interface SignupPageProps {
   onBack: () => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
+  /** Emails currently in the clients store — used for the duplicate-email guard.
+   *  Optional; treated as empty when omitted (e.g. from focused unit tests). */
+  existingEmails?: string[];
 }
 
 type Step = 'form' | 'verify';
 
-export function SignupPage({ onComplete, onBack, theme, onToggleTheme }: SignupPageProps) {
+export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingEmails }: SignupPageProps) {
   const [step, setStep] = useState<Step>('form');
 
   // Form fields
@@ -72,6 +75,16 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme }: SignupP
     else if (!isValidEmail(email)) errs.push(INVALID_EMAIL_MESSAGE);
     if (!strength.ok) errs.push(...strength.errors.map((e) => `Password: ${e}`));
     if (password !== confirm) errs.push('Passwords do not match.');
+
+    // Duplicate-email guard — refuse to send the OTP for an email that's
+    // already in the system. Case-insensitive, trims surrounding whitespace.
+    const normalizedEmail = email.trim().toLowerCase();
+    if (
+      normalizedEmail &&
+      (existingEmails ?? []).some((e) => e.toLowerCase() === normalizedEmail)
+    ) {
+      errs.push('An account with this email already exists.');
+    }
 
     // Validate invite code
     const invite = lookupInviteCode(inviteCode);

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 import { useAuth } from './hooks/useAuth';
 import { useProgramData } from './hooks/useProgramData';
-import { TechnicalCard, TechnicalInput, Modal } from './components/ui';
+import { TechnicalCard, TechnicalInput, Modal, Toast } from './components/ui';
 import { AdminView } from './components/admin/AdminView';
 import { SuperadminView } from './components/admin/SuperadminView';
 import { ClientDashboard } from './components/trainee/ClientDashboard';
@@ -366,6 +366,8 @@ function AppShell({
   onGoAdmin,
   impersonating,
   onStopImpersonating,
+  toast,
+  onDismissToast,
 }: {
   children: React.ReactNode;
   authenticatedUser: Client;
@@ -375,6 +377,8 @@ function AppShell({
   onGoAdmin: () => void;
   impersonating?: Client | null;
   onStopImpersonating?: () => void;
+  toast?: string | null;
+  onDismissToast?: () => void;
 }) {
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -433,6 +437,7 @@ function AppShell({
       >
         {children}
       </motion.main>
+      <Toast message={toast ?? null} onDismiss={onDismissToast} />
     </div>
   );
 }
@@ -447,6 +452,17 @@ export default function App() {
   const [activeWorkout, setActiveWorkout] = useState<{ week: WorkoutWeek; day: WorkoutDay } | null>(null);
   const [isAddClientOpen, setIsAddClientOpen] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Auto-dismiss the toast 3s after it's shown. The effect re-runs when
+  // `toast` changes, so triggering a new toast resets the timer cleanly.
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const dismissToast = () => setToast(null);
 
   // Apply theme class to <html>
   useEffect(() => {
@@ -566,6 +582,7 @@ export default function App() {
     if (!program) return;
     saveSession(selectedClient.id, program.id, activeWorkout.week.id, updatedDay);
     setActiveWorkout(null);
+    setToast('Session saved successfully');
   };
 
   const handleAddCoach = async (name: string, email: string, password: string) => {
@@ -602,6 +619,7 @@ export default function App() {
         onBack={() => setView('landing')}
         theme={theme}
         onToggleTheme={toggleTheme}
+        existingEmails={clients.map((c) => c.email)}
       />
     );
   }
@@ -645,6 +663,8 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onLogout={logout}
+        toast={toast}
+        onDismissToast={dismissToast}
         onGoAdmin={() => {}}
       >
         <SuperadminView
@@ -670,6 +690,8 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onLogout={logout}
+        toast={toast}
+        onDismissToast={dismissToast}
         onGoAdmin={() => setView('admin')}
         impersonating={impersonating}
         onStopImpersonating={stopImpersonating}
@@ -700,6 +722,8 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onLogout={logout}
+        toast={toast}
+        onDismissToast={dismissToast}
         onGoAdmin={() => setView('admin')}
         impersonating={impersonating}
         onStopImpersonating={stopImpersonating}
@@ -731,6 +755,8 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onLogout={logout}
+        toast={toast}
+        onDismissToast={dismissToast}
         onGoAdmin={() => setView('admin')}
         impersonating={impersonating}
         onStopImpersonating={stopImpersonating}
@@ -764,6 +790,8 @@ export default function App() {
       theme={theme}
       onToggleTheme={toggleTheme}
       onLogout={logout}
+      toast={toast}
+      onDismissToast={dismissToast}
       onGoAdmin={() => setView('admin')}
       impersonating={impersonating}
       onStopImpersonating={stopImpersonating}
