@@ -1,19 +1,14 @@
 /**
- * Email Service — Resend API integration
+ * Email Service — frontend client for the /api/send-email Vercel function.
  *
- * Uses the Resend REST API directly via fetch (browser-compatible).
- * Falls back to console logging when VITE_RESEND_API_KEY is not set.
+ * The Resend API key lives strictly on the server (process.env.RESEND_API_KEY,
+ * NOT prefixed with VITE_). The browser only knows how to POST to /api/send-email
+ * with the rendered HTML; it never holds a secret.
  *
- * Security note: In production, API calls should go through a backend proxy.
- * This direct approach is acceptable for the current SPA prototype.
+ * Failsafe: in dev (or any environment where the API call fails — e.g. local
+ * `vite` without `vercel dev`), the OTP is also logged to the console so the
+ * signup/reset flow is never blocked during development.
  */
-
-const RESEND_API_KEY = import.meta.env.VITE_RESEND_API_KEY as string | undefined;
-const FROM_ADDRESS = 'IronTrack <onboarding@resend.dev>';
-
-function isResendConfigured(): boolean {
-  return !!RESEND_API_KEY && RESEND_API_KEY !== '';
-}
 
 // ─── HTML Template ──────────────────────────────────────────────────────────
 
@@ -91,55 +86,61 @@ function buildEmailHtml(code: string, purpose: 'signup' | 'reset'): string {
 </html>`;
 }
 
-// ─── Send via Resend API ────────────────────────────────────────────────────
+// ─── POST to /api/send-email ────────────────────────────────────────────────
 
-async function sendViaResend(to: string, subject: string, html: string): Promise<boolean> {
+async function sendViaApi(to: string, subject: string, html: string): Promise<boolean> {
+  if (typeof fetch === 'undefined') return false;
   try {
-    const res = await fetch('https://api.resend.com/emails', {
+    const res = await fetch('/api/send-email', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({ from: FROM_ADDRESS, to: [to], subject, html }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, subject, html }),
     });
     if (!res.ok) {
-      const body = await res.text();
-      console.warn('[IronTrack Email] Resend API error:', res.status, body);
+      const text = await res.text().catch(() => '');
+      console.warn('[IronTrack Email] API responded', res.status, text);
       return false;
     }
     console.log(`%c[IronTrack Email] Sent to ${to}`, 'color: #22c55e; font-weight: bold;');
     return true;
   } catch (err) {
-    console.warn('[IronTrack Email] Network error:', err);
+    console.warn('[IronTrack Email] Network/API error:', err);
     return false;
   }
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
+/**
+ * In dev / test (`import.meta.env.DEV === true`), always log the OTP to the
+ * console synchronously BEFORE attempting the API call. This guarantees the
+ * code is visible in local browser devtools and stays available to test
+ * console.log spies that don't await microtasks. In production we only fall
+ * back to console logging if the API call actually failed.
+ */
+function logOtpFallback(prefix: string, email: string, code: string): void {
+  const style = 'color: #22c55e; font-weight: bold; font-size: 14px;';
+  console.log(`%c${prefix} Code for ${email}: ${code}`, style);
+}
+
 export async function sendVerificationEmailViaResend(email: string, code: string): Promise<void> {
-  if (isResendConfigured()) {
-    const html = buildEmailHtml(code, 'signup');
-    const sent = await sendViaResend(email, 'IronTrack — Verify Your Email', html);
-    if (sent) return;
+  if (import.meta.env.DEV) {
+    logOtpFallback('[IronTrack Verification]', email, code);
   }
-  // Fallback to console
-  console.log(
-    `%c[IronTrack Verification] Code for ${email}: ${code}`,
-    'color: #22c55e; font-weight: bold; font-size: 14px;'
-  );
+  const html = buildEmailHtml(code, 'signup');
+  const sent = await sendViaApi(email, 'IronTrack — Verify Your Email', html);
+  if (!sent && !import.meta.env.DEV) {
+    logOtpFallback('[IronTrack Verification]', email, code);
+  }
 }
 
 export async function sendPasswordResetEmailViaResend(email: string, code: string): Promise<void> {
-  if (isResendConfigured()) {
-    const html = buildEmailHtml(code, 'reset');
-    const sent = await sendViaResend(email, 'IronTrack — Password Reset Code', html);
-    if (sent) return;
+  if (import.meta.env.DEV) {
+    logOtpFallback('[PASSWORD RESET CODE]', email, code);
   }
-  // Fallback to console
-  console.log(
-    `%c[PASSWORD RESET CODE] Code for ${email}: ${code}`,
-    'color: #f59e0b; font-weight: bold; font-size: 14px;'
-  );
+  const html = buildEmailHtml(code, 'reset');
+  const sent = await sendViaApi(email, 'IronTrack — Password Reset Code', html);
+  if (!sent && !import.meta.env.DEV) {
+    logOtpFallback('[PASSWORD RESET CODE]', email, code);
+  }
 }

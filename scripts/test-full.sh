@@ -30,8 +30,9 @@ echo "╚═══════════════════════�
 # Layer 1: Regression (Vitest unit + integration)
 run_layer "Regression (Vitest)" npx vitest run --run
 
-# Layer 2: Type Check
+# Layer 2: Type Check (frontend + serverless API)
 run_layer "Type Check (tsc)" npx tsc --noEmit
+run_layer "Type Check (api)" npx tsc -p api/tsconfig.json --noEmit
 
 # Layer 3: Lint
 run_layer "Lint (ESLint)" npx eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0
