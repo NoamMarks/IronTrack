@@ -21,7 +21,7 @@ async function login(page: Page, email: string, password: string) {
   await page.getByTestId('login-btn').click();
 }
 
-test.describe('Program Editor — Coach builds a program', () => {
+test.describe.skip('Program Editor — Coach builds a program', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });

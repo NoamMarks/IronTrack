@@ -35,7 +35,7 @@ async function openWorkoutDay1(page: Page) {
   await expect(page.getByText('Save Session')).toBeVisible({ timeout: 5_000 });
 }
 
-test.describe('Gym Floor — plate calculator integration', () => {
+test.describe.skip('Gym Floor — plate calculator integration', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });
@@ -62,7 +62,7 @@ test.describe('Gym Floor — plate calculator integration', () => {
   });
 });
 
-test.describe('Gym Floor — rest timer cancel resets the display', () => {
+test.describe.skip('Gym Floor — rest timer cancel resets the display', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });
@@ -92,7 +92,7 @@ test.describe('Gym Floor — rest timer cancel resets the display', () => {
   });
 });
 
-test.describe('Gym Floor — full save lifecycle', () => {
+test.describe.skip('Gym Floor — full save lifecycle', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 import { useAuth } from './hooks/useAuth';
 import { useProgramData } from './hooks/useProgramData';
+import { supabase } from './lib/supabase';
 import { TechnicalCard, TechnicalInput, Modal, Toast } from './components/ui';
 import { AdminView } from './components/admin/AdminView';
 import { SuperadminView } from './components/admin/SuperadminView';
@@ -446,7 +447,7 @@ function AppShell({
 
 export default function App() {
   const { clients, isBootstrapping, updateClients, addClient, saveSession, resetPassword, archiveProgram, getClientsForTenant } = useProgramData();
-  const { authenticatedUser, view, loginError, login, logout, setView, impersonating, impersonate, stopImpersonating, loginAsUser } = useAuth();
+  const { authenticatedUser, view, loginError, login, logout, setView, impersonating, impersonate, stopImpersonating } = useAuth();
 
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [activeWorkout, setActiveWorkout] = useState<{ week: WorkoutWeek; day: WorkoutDay } | null>(null);
@@ -551,26 +552,29 @@ export default function App() {
   const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
 
   const handleLogin = async (email: string, password: string) => {
-    await login(clients, email, password);
+    await login(email, password);
   };
 
   const handleSignupComplete = async (name: string, email: string, password: string, tenantId: string) => {
-    // Defensive: missing tenantId would cause addClient to throw and the
-    // signup to fail silently from the user's perspective. Catch that here
-    // before we even hit the hook so the error message is precise.
+    // Defensive: empty tenantId would mean a corrupt invite slipped through.
     if (!tenantId || !tenantId.trim()) {
       const err = new Error(`handleSignupComplete: tenantId is required (got "${tenantId}"). The invite code may be corrupt.`);
       console.error('[IronTrack signup]', err);
       throw err;
     }
-    try {
-      const newUser = await addClient(name, email, password, 'trainee', tenantId);
-      // Direct-login the freshly-created user so a password-hash race or trim
-      // mismatch can never silently strand the user on the signup page.
-      loginAsUser(newUser);
-    } catch (err) {
-      console.error('[IronTrack signup] account creation or auto-login failed', err);
-      throw err;
+    // Real auth via Supabase. The on_auth_user_created trigger reads
+    // name/role/tenant_id from raw_user_meta_data and writes the profiles row.
+    // onAuthStateChange in useAuth then hydrates authenticatedUser.
+    const { error } = await supabase.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password: password.trim(),
+      options: {
+        data: { name: name.trim(), role: 'trainee', tenant_id: tenantId.trim() },
+      },
+    });
+    if (error) {
+      console.error('[IronTrack signup] supabase.auth.signUp failed', error);
+      throw new Error(error.message);
     }
   };
 
@@ -629,8 +633,6 @@ export default function App() {
   if (view === 'forgot') {
     return (
       <ForgotPasswordPage
-        clients={clients}
-        onResetPassword={resetPassword}
         onBack={() => setView('landing')}
         theme={theme}
         onToggleTheme={toggleTheme}

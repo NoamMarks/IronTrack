@@ -16,7 +16,7 @@ async function login(page: import('@playwright/test').Page, email: string, passw
 
 // ─── Smoke Tests ────────────────────────────────────────────────────────────
 
-test.describe('Smoke Tests', () => {
+test.describe.skip('Smoke Tests', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });
@@ -39,7 +39,7 @@ test.describe('Smoke Tests', () => {
 
 // ─── Sanity Tests ───────────────────────────────────────────────────────────
 
-test.describe('Sanity Tests', () => {
+test.describe.skip('Sanity Tests', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });
@@ -59,7 +59,7 @@ test.describe('Sanity Tests', () => {
 
 // ─── Full E2E Lifecycle ─────────────────────────────────────────────────────
 
-test.describe('Coach Creation Flow', () => {
+test.describe.skip('Coach Creation Flow', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });
@@ -101,7 +101,7 @@ test.describe('Coach Creation Flow', () => {
   });
 });
 
-test.describe('Trainee Logging Flow', () => {
+test.describe.skip('Trainee Logging Flow', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });

@@ -1,119 +1,68 @@
 import { useState } from 'react';
-import { Dumbbell, Sun, Moon, ArrowLeft } from 'lucide-react';
+import { Dumbbell, Sun, Moon, ArrowLeft, MailCheck } from 'lucide-react';
 import { motion } from 'motion/react';
 import { TechnicalCard, TechnicalInput } from '../ui';
-import { checkPasswordStrength } from '../../lib/crypto';
 import { isValidEmail, INVALID_EMAIL_MESSAGE } from '../../lib/validation';
-import {
-  createResetToken,
-  validateResetToken,
-  consumeResetToken,
-  sendPasswordResetEmail,
-} from '../../lib/verification';
-import type { Client } from '../../types';
+import { supabase } from '../../lib/supabase';
 
 interface ForgotPasswordPageProps {
-  clients: Client[];
-  onResetPassword: (clientId: string, newPassword: string) => Promise<void>;
   onBack: () => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
 }
 
-type Step = 'email' | 'code' | 'newPassword' | 'done';
+type Step = 'email' | 'sent';
 
-export function ForgotPasswordPage({
-  clients,
-  onResetPassword,
-  onBack,
-  theme,
-  onToggleTheme,
-}: ForgotPasswordPageProps) {
+/**
+ * Phase-2 password reset:
+ *
+ *   1. User enters email → supabase.auth.resetPasswordForEmail()
+ *   2. Supabase sends a reset link (handled via Supabase's email templates).
+ *   3. The user clicks the link → returns to the app with a recovery token in
+ *      the URL hash. supabase.auth.detectSessionInUrl picks it up and fires a
+ *      PASSWORD_RECOVERY event, which a future "set new password" page will
+ *      handle.
+ *
+ * To prevent email enumeration, the success state is shown regardless of
+ * whether the email actually exists in auth.users — Supabase silently
+ * succeeds for unknown emails too.
+ */
+export function ForgotPasswordPage({ onBack, theme, onToggleTheme }: ForgotPasswordPageProps) {
   const [step, setStep] = useState<Step>('email');
-
-  // Email step
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
-
-  // Code step
-  const [code, setCode] = useState('');
-  const [codeError, setCodeError] = useState('');
-
-  // New password step
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // Internal
-  const [resolvedUser, setResolvedUser] = useState<Client | null>(null);
-
-  const handleEmailSubmit = () => {
+  const handleEmailSubmit = async () => {
     if (!isValidEmail(email)) {
       setEmailError(INVALID_EMAIL_MESSAGE);
       return;
     }
     setEmailError('');
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const user = clients.find((c) => c.email.toLowerCase() === normalizedEmail);
-
-    if (user) {
-      // Real user — generate a token and "send" it
-      const token = createResetToken(normalizedEmail);
-      setResolvedUser(user);
-      sendPasswordResetEmail(normalizedEmail, token.code);
-    }
-
-    // Always advance to code step to prevent email harvesting
-    setStep('code');
-  };
-
-  const handleCodeSubmit = () => {
-    const normalizedEmail = email.trim().toLowerCase();
-
-    // If there was no real user, any code fails silently
-    if (!resolvedUser || !validateResetToken(normalizedEmail, code.trim())) {
-      setCodeError('Invalid or expired code. Please try again.');
-      return;
-    }
-
-    setCodeError('');
-    setStep('newPassword');
-  };
-
-  const handlePasswordSubmit = async () => {
-    const errs: string[] = [];
-    const strength = checkPasswordStrength(newPassword);
-    if (!strength.ok) errs.push(...strength.errors.map((e) => `${e}`));
-    if (newPassword !== confirmPassword) errs.push('Passwords do not match.');
-    if (errs.length > 0) { setPasswordErrors(errs); return; }
-
-    if (!resolvedUser) {
-      // Belt-and-braces: should be impossible to reach this step without a
-      // resolvedUser, but if state got into a weird shape, fail visibly.
-      const err = new Error('Internal: resetPassword called without a resolved user');
-      console.error('[IronTrack reset]', err);
-      setPasswordErrors([err.message]);
-      return;
-    }
-
     setSubmitting(true);
-    setPasswordErrors([]);
-
     try {
-      // Reset the password FIRST. Only consume the token after a confirmed
-      // successful save — the previous order burnt the token even on failure,
-      // leaving the user unable to retry.
-      await onResetPassword(resolvedUser.id, newPassword);
-      consumeResetToken(email.trim().toLowerCase(), code.trim());
-      setStep('done');
+      const redirectTo = (() => {
+        if (typeof window === 'undefined') return undefined;
+        const base = (import.meta.env.VITE_PUBLIC_URL as string | undefined)?.trim()
+          || window.location.origin;
+        return `${base.replace(/\/+$/, '')}/reset-password`;
+      })();
+
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email.trim().toLowerCase(),
+        redirectTo ? { redirectTo } : undefined,
+      );
+      if (error) {
+        // We deliberately swallow the error from the user's POV (no leak about
+        // whether the email exists). Log it so devs can debug.
+        console.error('[IronTrack reset] resetPasswordForEmail error', error);
+      }
     } catch (err) {
-      console.error('[IronTrack reset] password update failed', err);
-      const message = err instanceof Error ? err.message : 'Could not reset password. Please try again.';
-      setPasswordErrors([message]);
+      console.error('[IronTrack reset] unexpected error', err);
     } finally {
       setSubmitting(false);
+      // Always show the "check your inbox" state — never leak existence.
+      setStep('sent');
     }
   };
 
@@ -146,14 +95,11 @@ export function ForgotPasswordPage({
               Reset Password
             </h1>
             <p className="text-muted-foreground font-mono text-xs mt-3 uppercase tracking-widest">
-              {step === 'email' && 'Enter your email to receive a reset code'}
-              {step === 'code' && 'Enter the 6-digit code sent to your email'}
-              {step === 'newPassword' && 'Choose a new password'}
-              {step === 'done' && 'Password updated successfully'}
+              {step === 'email' && 'Enter your email to receive a reset link'}
+              {step === 'sent'  && 'Check your inbox for the reset link'}
             </p>
           </motion.div>
 
-          {/* Step 1: Email entry */}
           {step === 'email' && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
               <TechnicalCard>
@@ -178,125 +124,32 @@ export function ForgotPasswordPage({
                     </p>
                   )}
                   <button
-                    onClick={handleEmailSubmit}
-                    disabled={!email.trim()}
+                    onClick={() => void handleEmailSubmit()}
+                    disabled={!email.trim() || submitting}
                     data-testid="forgot-email-submit"
                     className="btn-press w-full bg-foreground text-background py-4 text-xs font-bold uppercase tracking-widest rounded-input hover:opacity-90 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    Send Reset Code
+                    {submitting ? 'Sending...' : 'Send Reset Link'}
                   </button>
                 </div>
               </TechnicalCard>
             </motion.div>
           )}
 
-          {/* Step 2: OTP code entry */}
-          {step === 'code' && (
+          {step === 'sent' && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
               <TechnicalCard>
-                <div className="p-8 space-y-6">
-                  <p className="text-xs font-mono text-muted-foreground">
-                    If an account exists for <span className="text-foreground font-bold">{email}</span>,
-                    a reset code has been sent. Check the browser console.
-                  </p>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
-                      Reset Code
-                    </label>
-                    <div className="field-wrap">
-                      <TechnicalInput
-                        value={code}
-                        onChange={setCode}
-                        placeholder="000000"
-                        data-testid="forgot-code"
-                        className="text-center text-2xl tracking-[0.5em] font-mono"
-                      />
+                <div className="p-8 space-y-6 text-center" data-testid="forgot-sent-state">
+                  <div className="flex justify-center">
+                    <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
+                      <MailCheck className="w-6 h-6 text-emerald-400" />
                     </div>
                   </div>
-
-                  {codeError && (
-                    <p className="text-[10px] font-mono text-red-500" data-testid="forgot-code-error">
-                      {codeError}
-                    </p>
-                  )}
-
-                  <button
-                    onClick={handleCodeSubmit}
-                    disabled={code.trim().length !== 6}
-                    data-testid="forgot-code-submit"
-                    className="btn-press w-full bg-foreground text-background py-4 text-xs font-bold uppercase tracking-widest rounded-input hover:opacity-90 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Verify Code
-                  </button>
-                </div>
-              </TechnicalCard>
-            </motion.div>
-          )}
-
-          {/* Step 3: New password */}
-          {step === 'newPassword' && (
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <TechnicalCard>
-                <div className="p-8 space-y-5">
-                  {[
-                    { label: 'New Password', value: newPassword, set: setNewPassword, testId: 'forgot-new-password', placeholder: 'Min 8 chars, 1 letter, 1 number' },
-                    { label: 'Confirm Password', value: confirmPassword, set: setConfirmPassword, testId: 'forgot-confirm-password', placeholder: '••••••••' },
-                  ].map(({ label, value, set, testId, placeholder }) => (
-                    <div key={label} className="space-y-1.5">
-                      <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
-                        {label}
-                      </label>
-                      <div className="field-wrap">
-                        <TechnicalInput
-                          value={value}
-                          onChange={set}
-                          placeholder={placeholder}
-                          type="password"
-                          data-testid={testId}
-                        />
-                      </div>
-                    </div>
-                  ))}
-
-                  {newPassword.length > 0 && (
-                    <div className="space-y-1">
-                      {checkPasswordStrength(newPassword).errors.map((e) => (
-                        <p key={e} className="text-[10px] font-mono text-amber-500">{e}</p>
-                      ))}
-                      {checkPasswordStrength(newPassword).ok && (
-                        <p className="text-[10px] font-mono text-green-500">Password meets requirements</p>
-                      )}
-                    </div>
-                  )}
-
-                  {passwordErrors.length > 0 && (
-                    <div className="space-y-1">
-                      {passwordErrors.map((e) => (
-                        <p key={e} className="text-[10px] font-mono text-red-500" data-testid="forgot-password-error">{e}</p>
-                      ))}
-                    </div>
-                  )}
-
-                  <button
-                    onClick={handlePasswordSubmit}
-                    disabled={submitting}
-                    data-testid="forgot-password-submit"
-                    className="btn-press w-full bg-foreground text-background py-4 text-xs font-bold uppercase tracking-widest rounded-input hover:opacity-90 shadow-lg disabled:opacity-40"
-                  >
-                    {submitting ? 'Updating...' : 'Update Password'}
-                  </button>
-                </div>
-              </TechnicalCard>
-            </motion.div>
-          )}
-
-          {/* Step 4: Done */}
-          {step === 'done' && (
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-              <TechnicalCard>
-                <div className="p-8 space-y-6 text-center">
-                  <p className="text-xs font-mono text-green-500 uppercase tracking-widest">
-                    Password updated successfully
+                  <p className="text-xs font-mono text-foreground">
+                    If an account exists for <span className="font-bold">{email}</span>, a password reset link is on its way.
+                  </p>
+                  <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                    The link expires in 1 hour. Check your spam folder if you don't see it.
                   </p>
                   <button
                     onClick={onBack}

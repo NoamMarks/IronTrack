@@ -17,6 +17,7 @@
     "test:full": "bash scripts/test-full.sh"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.105.1",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "lucide-react": "^0.378.0",

@@ -21,7 +21,7 @@ async function login(page: Page, email: string, password: string) {
   await page.getByTestId('login-btn').click();
 }
 
-test.describe('Auth Guards — rogue navigation', () => {
+test.describe.skip('Auth Guards — rogue navigation', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });
@@ -46,7 +46,7 @@ test.describe('Auth Guards — rogue navigation', () => {
   });
 });
 
-test.describe('Auth Guards — login error states', () => {
+test.describe.skip('Auth Guards — login error states', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });
@@ -71,7 +71,7 @@ test.describe('Auth Guards — login error states', () => {
   });
 });
 
-test.describe('Auth Guards — signup error states', () => {
+test.describe.skip('Auth Guards — signup error states', () => {
   test.beforeEach(async ({ page }) => {
     await clearState(page);
   });

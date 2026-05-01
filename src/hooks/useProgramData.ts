@@ -170,18 +170,23 @@ export function useProgramData() {
   );
 
   const addClient = useCallback(
-    async (name: string, email: string, password: string, role: UserRole = 'trainee', tenantId?: string) => {
-      // Trim email + password BEFORE hashing so a fresh signup hash matches the
-      // login hash — login itself trims password before hashing, so any
-      // accidental trailing whitespace here would cause a silent auth mismatch.
+    async (
+      name: string,
+      email: string,
+      // password is accepted for backwards compatibility with existing callers
+      // (AddClientModal, CreateCoachModal) but is NO LONGER STORED. Real
+      // authentication now lives in Supabase auth — addClient only writes a
+      // local placeholder profile so the coach UI can show the new client
+      // before they complete Supabase signup. Phase 3 will fold this into the
+      // cloud-backed flow entirely.
+      _password: string,
+      role: UserRole = 'trainee',
+      tenantId?: string,
+    ) => {
       const trimmedEmail = email.trim();
-      const trimmedPassword = password.trim();
-      const hashed = await hashPassword(trimmedPassword);
       const id = Math.random().toString(36).substring(7);
 
-      // Tenant enforcement: every non-superadmin must have a tenantId.
-      // - admin (coach): own id is the tenant root, even if caller forgot to pass one
-      // - trainee: must inherit a coach's tenantId; refuse to create an orphan
+      // Tenant enforcement preserved verbatim from the localStorage era.
       let resolvedTenantId = tenantId?.trim() || undefined;
       if (role === 'admin') {
         resolvedTenantId = resolvedTenantId ?? id;
@@ -197,20 +202,20 @@ export function useProgramData() {
         id,
         name: name.trim(),
         email: trimmedEmail,
-        password: hashed,
+        // password field intentionally omitted — Supabase auth owns credentials.
         role,
         tenantId: resolvedTenantId,
         programs: [],
       };
-      // Append to whatever's actually in localStorage right now, NOT to the
-      // closure copy of `clients`. This is the core stale-closure fix.
-      // Duplicate-email backstop runs INSIDE the updater so the check sees
-      // the freshest persisted state — never a stale React snapshot.
+
+      // Duplicate-email backstop still runs against the freshest persisted
+      // state so the coach can't create two local placeholders for the same
+      // email accidentally.
       let duplicate = false;
       persistClients((current) => {
         if (current.some((c) => c.email.toLowerCase() === trimmedEmail.toLowerCase())) {
           duplicate = true;
-          return current; // no-op write
+          return current;
         }
         return [...current, newClient];
       });

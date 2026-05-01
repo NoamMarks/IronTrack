@@ -1,37 +1,30 @@
 import { useState, useCallback, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 import type { Client, AppView } from '../types';
-import { hashPassword } from '../lib/crypto';
-
-const SESSION_KEY = 'irontrack_session';
 
 interface AuthState {
   authenticatedUser: Client | null;
   view: AppView;
   loginError: string;
-  /** When superadmin is impersonating a coach, stores the original superadmin user */
+  /** When superadmin is impersonating a coach, stores the original superadmin user.
+   *  Note: impersonation is purely a client-side UI override — the underlying
+   *  Supabase session is still the superadmin's, so RLS-protected reads happen
+   *  with superadmin privileges. */
   impersonating: Client | null;
-}
-
-/** Persisted shape — narrower than AuthState so we never write loginError. */
-interface PersistedSession {
-  user: Client;
-  view: AppView;
-  impersonating: Client | null;
+  /** True until the initial getSession() resolves on mount. UI can use this
+   *  to avoid a flash of the login screen on reload while a session is
+   *  hydrating. */
+  isLoading: boolean;
 }
 
 interface UseAuthReturn extends AuthState {
-  login: (clients: Client[], email: string, password: string) => Promise<void>;
-  logout: () => void;
+  /** Sign in with email/password via Supabase. Sets `loginError` on failure;
+   *  state is populated by the onAuthStateChange listener on success. */
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
   setView: (view: AppView) => void;
-  /** Superadmin can impersonate a coach to see their environment */
   impersonate: (coach: Client) => void;
-  /** Stop impersonating and return to superadmin view */
   stopImpersonating: () => void;
-  /** Direct login for a freshly-created user — bypasses password verification
-   *  (the user was just created with that password, no need to re-hash). Used
-   *  by the signup flow to guarantee auto-login can never silently fail on a
-   *  hash mismatch. */
-  loginAsUser: (user: Client) => void;
 }
 
 function viewForRole(role: Client['role']): AppView {
@@ -42,34 +35,8 @@ function viewForRole(role: Client['role']): AppView {
   }
 }
 
-/** Synchronously read the persisted session — runs inside useState's initializer
- *  so the very first render already reflects the restored auth state. */
-function readPersistedSession(): PersistedSession | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedSession;
-    if (!parsed || !parsed.user || !parsed.view) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function writePersistedSession(session: PersistedSession | null): void {
-  if (typeof window === 'undefined') return;
-  if (session === null) {
-    localStorage.removeItem(SESSION_KEY);
-  } else {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  }
-}
-
-/**
- * Determine the initial view. Magic-link URLs (`/signup`, `?invite=`) override
- * any persisted session view so an invite click always lands on the signup form.
- */
+/** Magic-link URL detection: signup deep links override whatever view we'd
+ *  otherwise default to so an invite click always lands on the form. */
 function initialViewFromUrl(fallback: AppView): AppView {
   if (typeof window === 'undefined') return fallback;
   const params = new URLSearchParams(window.location.search);
@@ -79,58 +46,155 @@ function initialViewFromUrl(fallback: AppView): AppView {
   return fallback;
 }
 
+/** Map raw Supabase auth error messages onto the friendlier strings the UI
+ *  has historically shown. Anything we don't recognise falls through. */
+function mapAuthError(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes('invalid login credentials')) return 'Invalid email or password.';
+  if (m.includes('email not confirmed')) return 'Email not confirmed. Check your inbox for the confirmation link.';
+  if (m.includes('rate limit')) return 'Too many attempts. Try again in a moment.';
+  return message;
+}
+
+interface ProfileRow {
+  id: string;
+  name: string;
+  email: string;
+  role: Client['role'];
+  tenant_id: string | null;
+  active_program_id: string | null;
+}
+
+/** Fetch the public.profiles row for the given auth user and convert it to
+ *  the Client shape the rest of the app expects. Returns null on error. */
+async function loadProfile(userId: string, fallbackEmail: string): Promise<Client | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, name, email, role, tenant_id, active_program_id')
+    .eq('id', userId)
+    .single<ProfileRow>();
+  if (error) {
+    console.error('[IronTrack auth] failed to load profile', error);
+    return null;
+  }
+  if (!data) return null;
+  return {
+    id: data.id,
+    name: data.name,
+    email: data.email ?? fallbackEmail,
+    role: data.role,
+    tenantId: data.tenant_id ?? undefined,
+    activeProgramId: data.active_program_id ?? undefined,
+    // programs[] is owned by useProgramData (still localStorage in Phase 2).
+    // The cloud-database migration of programs lands in Phase 3.
+    programs: [],
+  };
+}
+
 export function useAuth(): UseAuthReturn {
-  const [state, setState] = useState<AuthState>(() => {
-    const session = readPersistedSession();
-    if (!session) {
-      return {
-        authenticatedUser: null,
-        view: initialViewFromUrl('landing'),
-        loginError: '',
-        impersonating: null,
-      };
-    }
-    return {
-      authenticatedUser: session.user,
-      view: initialViewFromUrl(session.view),
-      loginError: '',
-      impersonating: session.impersonating ?? null,
-    };
-  });
+  const [state, setState] = useState<AuthState>(() => ({
+    authenticatedUser: null,
+    view: initialViewFromUrl('landing'),
+    loginError: '',
+    impersonating: null,
+    isLoading: true,
+  }));
 
-  // Persist (or clear) whenever auth-affecting state changes. loginError is
-  // explicitly excluded from the deps because it's a transient UI flag, not
-  // session state.
+  // ─── Session bootstrap + onAuthStateChange ─────────────────────────────
   useEffect(() => {
-    if (state.authenticatedUser) {
-      writePersistedSession({
-        user: state.authenticatedUser,
-        view: state.view,
-        impersonating: state.impersonating,
-      });
-    } else {
-      writePersistedSession(null);
+    let cancelled = false;
+
+    async function bootstrap() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (cancelled) return;
+
+      if (session?.user) {
+        const profile = await loadProfile(session.user.id, session.user.email ?? '');
+        if (cancelled) return;
+        if (profile) {
+          setState((prev) => ({
+            ...prev,
+            authenticatedUser: profile,
+            // If the URL forced 'signup', honour it (user clicked an invite while
+            // already authenticated). Otherwise use the role-default.
+            view: prev.view === 'signup' ? prev.view : viewForRole(profile.role),
+            isLoading: false,
+          }));
+          return;
+        }
+      }
+      setState((prev) => ({ ...prev, isLoading: false }));
     }
-  }, [state.authenticatedUser, state.view, state.impersonating]);
+    bootstrap();
 
-  const login = useCallback(async (clients: Client[], email: string, password: string) => {
-    const normalizedEmail = email.trim().toLowerCase();
-    const hashedInput = await hashPassword(password.trim());
-
-    const user = clients.find(
-      (c) => c.email.toLowerCase() === normalizedEmail && c.password === hashedInput
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (cancelled) return;
+        if (event === 'SIGNED_OUT' || !session?.user) {
+          setState({
+            authenticatedUser: null,
+            view: 'landing',
+            loginError: '',
+            impersonating: null,
+            isLoading: false,
+          });
+          return;
+        }
+        // SIGNED_IN, TOKEN_REFRESHED, USER_UPDATED, PASSWORD_RECOVERY
+        const profile = await loadProfile(session.user.id, session.user.email ?? '');
+        if (cancelled) return;
+        if (!profile) {
+          // Auth session exists but profile is missing — treat as logged out
+          // so the UI doesn't render against a half-initialised user.
+          setState((prev) => ({
+            ...prev,
+            authenticatedUser: null,
+            isLoading: false,
+            loginError: 'Your account is missing a profile. Please contact your coach.',
+          }));
+          return;
+        }
+        setState((prev) => ({
+          ...prev,
+          authenticatedUser: profile,
+          // Pick a view if we don't have one yet; otherwise leave alone so the
+          // user stays on the page they were on (e.g. mid-navigation).
+          view: prev.authenticatedUser ? prev.view : viewForRole(profile.role),
+          loginError: '',
+          isLoading: false,
+        }));
+      },
     );
 
-    if (!user) {
-      setState((prev) => ({ ...prev, loginError: 'Invalid email or password.' }));
-      return;
-    }
-
-    setState({ authenticatedUser: user, view: viewForRole(user.role), loginError: '', impersonating: null });
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const logout = useCallback(() => {
-    setState({ authenticatedUser: null, view: 'landing', loginError: '', impersonating: null });
+  // ─── Auth actions ──────────────────────────────────────────────────────
+
+  const login = useCallback(async (email: string, password: string) => {
+    // Clear any stale error from a previous attempt
+    setState((prev) => ({ ...prev, loginError: '' }));
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password: password.trim(),
+    });
+    if (error) {
+      console.error('[IronTrack auth] sign-in failed', error);
+      setState((prev) => ({ ...prev, loginError: mapAuthError(error.message) }));
+      return;
+    }
+    // onAuthStateChange will hydrate authenticatedUser + view.
+  }, []);
+
+  const logout = useCallback(async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('[IronTrack auth] sign-out failed', error);
+    }
+    // onAuthStateChange will reset state.
   }, []);
 
   const setView = useCallback((view: AppView) => {
@@ -155,14 +219,5 @@ export function useAuth(): UseAuthReturn {
     }));
   }, []);
 
-  const loginAsUser = useCallback((user: Client) => {
-    setState({
-      authenticatedUser: user,
-      view: viewForRole(user.role),
-      loginError: '',
-      impersonating: null,
-    });
-  }, []);
-
-  return { ...state, login, logout, setView, impersonate, stopImpersonating, loginAsUser };
+  return { ...state, login, logout, setView, impersonate, stopImpersonating };
 }

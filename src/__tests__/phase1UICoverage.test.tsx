@@ -201,11 +201,9 @@ describe('Phase 1C: SignupPage form validation states', () => {
 // ─── Phase 1D: ForgotPasswordPage email format ──────────────────────────────
 
 describe('Phase 1D: ForgotPasswordPage email validation', () => {
-  it('shows the format error and does NOT advance to the code step', () => {
+  it('shows the format error and does NOT advance to the sent state', () => {
     render(
       <ForgotPasswordPage
-        clients={[]}
-        onResetPassword={vi.fn().mockResolvedValue(undefined)}
         onBack={vi.fn()}
         theme="dark"
         onToggleTheme={vi.fn()}
@@ -214,7 +212,9 @@ describe('Phase 1D: ForgotPasswordPage email validation', () => {
     fireEvent.change(screen.getByTestId('forgot-email'), { target: { value: 'not-valid' } });
     fireEvent.click(screen.getByTestId('forgot-email-submit'));
     expect(screen.getByTestId('forgot-email-error')).toBeInTheDocument();
-    expect(screen.queryByTestId('forgot-code')).toBeNull();
+    // Phase-2 single-step flow: success view is gated by a real submit; the
+    // format-error path keeps the user on the email step.
+    expect(screen.queryByTestId('forgot-sent-state')).toBeNull();
   });
 });
 
