@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Client, AppView } from '../types';
 
@@ -106,6 +106,13 @@ export function useAuth(): UseAuthReturn {
     isLoading: true,
   }));
 
+  // Tracks the auth.user.id we've already hydrated a profile for. supabase-js
+  // fires INITIAL_SESSION synchronously after subscribe(), then TOKEN_REFRESHED
+  // every hour, USER_UPDATED on metadata changes, etc. — all carrying the same
+  // user id. Without this guard, every event would re-fetch the profile and
+  // re-setState, which is the trigger for the observed render loop.
+  const currentUserIdRef = useRef<string | null>(null);
+
   // ─── Session bootstrap + onAuthStateChange ─────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -124,6 +131,10 @@ export function useAuth(): UseAuthReturn {
           const profile = await loadProfile(session.user.id, session.user.email ?? '');
           if (cancelled) return;
           if (profile) {
+            // Record the bootstrap-loaded user id so the INITIAL_SESSION
+            // event (which carries the same session) sees a cache hit and
+            // skips a duplicate loadProfile + setState.
+            currentUserIdRef.current = profile.id;
             // Invite links must ALWAYS route to /signup, even when a stale
             // session is hydrated from localStorage — the click is an explicit
             // signal that the user intends to create a NEW account, and we
@@ -151,45 +162,87 @@ export function useAuth(): UseAuthReturn {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (cancelled) return;
-        if (event === 'SIGNED_OUT' || !session?.user) {
-          // Race-condition guard: supabase-js fires INITIAL_SESSION with a
-          // null session synchronously after subscribe(), which would clobber
-          // the 'signup' view that initialViewFromUrl just seeded. If the URL
-          // still says "this is an invite click", urlHasInvite() remains the
-          // single source of truth and we route to /signup instead of
-          // dropping the user on the landing/login page.
-          setState({
-            authenticatedUser: null,
-            view: urlHasInvite() ? 'signup' : 'landing',
-            loginError: '',
-            impersonating: null,
-            isLoading: false,
-          });
-          return;
-        }
-        // SIGNED_IN, TOKEN_REFRESHED, USER_UPDATED, PASSWORD_RECOVERY
-        const profile = await loadProfile(session.user.id, session.user.email ?? '');
-        if (cancelled) return;
-        if (!profile) {
-          // Auth session exists but profile is missing — treat as logged out
-          // so the UI doesn't render against a half-initialised user.
+        // try/catch/finally mirrors the bootstrap contract: any unexpected
+        // failure inside loadProfile / setState computation must NOT leave
+        // the UI stuck on "INITIALIZING...". The finally clause guarantees
+        // isLoading is cleared at the end of every event, just like bootstrap.
+        try {
+          const incomingUserId = session?.user?.id ?? null;
+          const previousUserId = currentUserIdRef.current;
+
+          // ── Strict identity guard ───────────────────────────────────────
+          // TOKEN_REFRESHED, USER_UPDATED, and the synchronous INITIAL_SESSION
+          // re-emit all carry the SAME user id we already have hydrated.
+          // Re-running loadProfile + setState on each one was the root cause
+          // of the infinite re-render. Bail out early when nothing changed.
+          if (incomingUserId !== null && incomingUserId === previousUserId) {
+            return;
+          }
+
+          if (event === 'SIGNED_OUT' || !session?.user) {
+            currentUserIdRef.current = null;
+            // urlHasInvite() stays the single source of truth for invite
+            // routing — preserved from the prior fix.
+            const nextView: AppView = urlHasInvite() ? 'signup' : 'landing';
+            setState((prev) => {
+              // No-op bailout: if we're already in the logged-out shape the
+              // listener is being asked to reproduce, return prev so React
+              // skips the render. This is what closes the INITIAL_SESSION
+              // re-fire loop on a fresh page load with no session.
+              if (
+                prev.authenticatedUser === null &&
+                prev.impersonating === null &&
+                prev.loginError === '' &&
+                prev.view === nextView &&
+                !prev.isLoading
+              ) {
+                return prev;
+              }
+              return {
+                authenticatedUser: null,
+                view: nextView,
+                loginError: '',
+                impersonating: null,
+                isLoading: false,
+              };
+            });
+            return;
+          }
+
+          // SIGNED_IN / PASSWORD_RECOVERY for a NEW user id — hydrate.
+          const profile = await loadProfile(session.user.id, session.user.email ?? '');
+          if (cancelled) return;
+          if (!profile) {
+            currentUserIdRef.current = null;
+            // Auth session exists but profile is missing — treat as logged
+            // out so the UI doesn't render against a half-initialised user.
+            setState((prev) => ({
+              ...prev,
+              authenticatedUser: null,
+              loginError: 'Your account is missing a profile. Please contact your coach.',
+            }));
+            return;
+          }
+          currentUserIdRef.current = profile.id;
           setState((prev) => ({
             ...prev,
-            authenticatedUser: null,
-            isLoading: false,
-            loginError: 'Your account is missing a profile. Please contact your coach.',
+            authenticatedUser: profile,
+            // Pick a view if we don't have one yet; otherwise leave alone so the
+            // user stays on the page they were on (e.g. mid-navigation).
+            view: prev.authenticatedUser ? prev.view : viewForRole(profile.role),
+            loginError: '',
           }));
-          return;
+        } catch (err) {
+          console.error('[IronTrack auth] onAuthStateChange failure', err);
+        } finally {
+          if (!cancelled) {
+            // Always clear isLoading at the end of the callback — same
+            // contract as the bootstrap's finally clause. setState bails out
+            // when isLoading is already false (returning prev keeps render
+            // counts honest).
+            setState((prev) => (prev.isLoading ? { ...prev, isLoading: false } : prev));
+          }
         }
-        setState((prev) => ({
-          ...prev,
-          authenticatedUser: profile,
-          // Pick a view if we don't have one yet; otherwise leave alone so the
-          // user stays on the page they were on (e.g. mid-navigation).
-          view: prev.authenticatedUser ? prev.view : viewForRole(profile.role),
-          loginError: '',
-          isLoading: false,
-        }));
       },
     );
 

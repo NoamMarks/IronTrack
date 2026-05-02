@@ -463,7 +463,16 @@ export default function App() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [activeWorkout, setActiveWorkout] = useState<{ week: WorkoutWeek; day: WorkoutDay } | null>(null);
   const [isAddClientOpen, setIsAddClientOpen] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  // Lazy initializer reads the saved preference SYNCHRONOUSLY before the
+  // theme-persist effect runs. The previous "set default 'dark', then a
+  // useEffect reads localStorage on mount" pattern was racy: the persist
+  // effect (declared earlier) overwrote the saved value with the default
+  // before the restore effect could read it back.
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window === 'undefined') return 'dark';
+    const saved = window.localStorage.getItem('irontrack_theme');
+    return saved === 'light' || saved === 'dark' ? saved : 'dark';
+  });
   const [toast, setToast] = useState<string | null>(null);
 
   // Auto-dismiss the toast 3s after it's shown. The effect re-runs when
@@ -476,18 +485,14 @@ export default function App() {
 
   const dismissToast = () => setToast(null);
 
-  // Apply theme class to <html>
+  // Apply theme class to <html> and persist on change. The initial value
+  // already came from localStorage via the useState lazy initializer above,
+  // so this effect is purely "react to user-driven changes."
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     document.documentElement.classList.toggle('light', theme === 'light');
     localStorage.setItem('irontrack_theme', theme);
   }, [theme]);
-
-  // Restore theme preference
-  useEffect(() => {
-    const saved = localStorage.getItem('irontrack_theme') as 'dark' | 'light' | null;
-    if (saved) setTheme(saved);
-  }, []);
 
   // Magic-link routing now happens synchronously inside useAuth's state
   // initializer — no effect needed here.
@@ -573,19 +578,52 @@ export default function App() {
       console.error('[IronTrack signup]', err);
       throw err;
     }
-    // Real auth via Supabase. The on_auth_user_created trigger reads
-    // name/role/tenant_id from raw_user_meta_data and writes the profiles row.
-    // onAuthStateChange in useAuth then hydrates authenticatedUser.
-    const { error } = await supabase.auth.signUp({
-      email: email.trim().toLowerCase(),
-      password: password.trim(),
-      options: {
-        data: { name: name.trim(), role: 'trainee', tenant_id: tenantId.trim() },
-      },
-    });
-    if (error) {
-      console.error('[IronTrack signup] supabase.auth.signUp failed', error);
-      throw new Error(error.message);
+    try {
+      // Trainee signup flows through /api/signup-user instead of
+      // supabase.auth.signUp. The serverless function uses the service-role
+      // key to call admin.createUser({ email_confirm: true }), which skips
+      // the inbox-confirmation hurdle so the OTP step IS the verification
+      // gate. The service-role key never leaves the server.
+      const normalizedEmail = email.trim().toLowerCase();
+      const response = await fetch('/api/signup-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: normalizedEmail,
+          password,
+          tenantId: tenantId.trim(),
+        }),
+      });
+
+      let payload: { profile?: unknown; error?: string } = {};
+      try {
+        payload = await response.json();
+      } catch {
+        // Non-JSON body — fall through with an empty payload so the !ok
+        // branch below surfaces a generic error instead of a parse trace.
+      }
+
+      if (!response.ok) {
+        throw new Error(payload.error || `Signup failed (HTTP ${response.status}).`);
+      }
+
+      // Auto-login. The user's email is already confirmed server-side, so
+      // signInWithPassword succeeds and onAuthStateChange in useAuth picks
+      // up the session, hydrates authenticatedUser, and routes to /trainee.
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+      if (signInErr) {
+        console.error('[IronTrack signup] auto sign-in failed', signInErr);
+        throw new Error(signInErr.message);
+      }
+    } catch (err) {
+      console.error('[IronTrack signup] failure', err);
+      const message = err instanceof Error ? err.message : 'Signup failed. Please try again.';
+      setToast(message);
+      throw err instanceof Error ? err : new Error(message);
     }
   };
 
@@ -663,13 +701,16 @@ export default function App() {
 
   if (view === 'signup') {
     return (
-      <SignupPage
-        onComplete={handleSignupComplete}
-        onBack={() => setView('landing')}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        existingEmails={clients.map((c) => c.email)}
-      />
+      <>
+        <SignupPage
+          onComplete={handleSignupComplete}
+          onBack={() => setView('landing')}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          existingEmails={clients.map((c) => c.email)}
+        />
+        <Toast message={toast ?? null} onDismiss={dismissToast} />
+      </>
     );
   }
 
@@ -677,11 +718,14 @@ export default function App() {
 
   if (view === 'forgot') {
     return (
-      <ForgotPasswordPage
-        onBack={() => setView('landing')}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-      />
+      <>
+        <ForgotPasswordPage
+          onBack={() => setView('landing')}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+        />
+        <Toast message={toast ?? null} onDismiss={dismissToast} />
+      </>
     );
   }
 
@@ -689,15 +733,18 @@ export default function App() {
 
   if (!authenticatedUser || view === 'landing') {
     return (
-      <LandingPage
-        onLogin={handleLogin}
-        onSignup={() => setView('signup')}
-        onForgot={() => setView('forgot')}
-        loginError={loginError}
-        isBootstrapping={isAuthLoading}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-      />
+      <>
+        <LandingPage
+          onLogin={handleLogin}
+          onSignup={() => setView('signup')}
+          onForgot={() => setView('forgot')}
+          loginError={loginError}
+          isBootstrapping={isAuthLoading}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+        />
+        <Toast message={toast ?? null} onDismiss={dismissToast} />
+      </>
     );
   }
 

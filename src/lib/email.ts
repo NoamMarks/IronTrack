@@ -88,7 +88,27 @@ function buildEmailHtml(code: string, purpose: 'signup' | 'reset'): string {
 
 // ─── POST to /api/send-email ────────────────────────────────────────────────
 
+/**
+ * Console-only mode. While Resend is still in test mode (sender domain not
+ * verified at resend.com/domains), the /api/send-email function 502s for
+ * any recipient other than the account owner's address, which spams the
+ * browser console with a confusing error. Set to `false` once a real domain
+ * is verified and the `from:` in api/send-email.ts is updated — that's the
+ * only switch needed to flip back to live email delivery.
+ *
+ * The OTP is still logged to the browser console via logOtpFallback below,
+ * so the signup / password-reset flows are fully usable in this mode.
+ */
+const EMAIL_CONSOLE_ONLY = true;
+
 async function sendViaApi(to: string, subject: string, html: string): Promise<boolean> {
+  if (EMAIL_CONSOLE_ONLY) {
+    // Skip the network call entirely — the OTP has already been printed to
+    // the console by logOtpFallback. Return false so the caller's fallback
+    // path (when DEV is false) still triggers, though in practice this flag
+    // is only used while DEV-style console delivery is the desired UX.
+    return false;
+  }
   if (typeof fetch === 'undefined') return false;
   try {
     const res = await fetch('/api/send-email', {
