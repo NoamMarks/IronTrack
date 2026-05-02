@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeft, Trash2, Archive, Link2, Link as LinkIcon, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProgramEditor } from './ProgramEditor';
@@ -56,19 +56,69 @@ export function AdminView({
     return () => { cancelled = true; };
   }, [authenticatedUser.id]);
 
-  // Keep the editing program in sync with the live store after archive/save
+  // ── Debounced save ──────────────────────────────────────────────────────
+  // Keystrokes coalesce into a single saveProgram call after the user stops
+  // typing for SAVE_DEBOUNCE_MS. Without this, every keystroke fired its own
+  // multi-round-trip Supabase write, and the resulting in-flight saves
+  // landed out of order, clobbering the input with stale values.
+  const SAVE_DEBOUNCE_MS = 500;
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveRef = useRef<Program | null>(null);
+
+  const flushSave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const toSave = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    if (!toSave) return;
+    void onSaveProgram(toSave).catch((err) => {
+      console.error('[IronTrack admin] saveProgram failed', err);
+    });
+  }, [onSaveProgram]);
+
+  // Flush on unmount so the user doesn't lose the last keystroke if they
+  // navigate away inside SAVE_DEBOUNCE_MS.
+  useEffect(() => {
+    return () => {
+      flushSave();
+    };
+  }, [flushSave]);
+
+  // ── Keep the editing program in sync with the live store ────────────────
+  // External mutations (archive, delete-client, program created on another
+  // client) flow in via clients[]. We must NOT clobber the local
+  // `editingProgram` while the user is actively editing — saveProgram
+  // already merges the saved program into clients[], so the in-progress
+  // draft is what the user has typed. Only re-derive when:
+  //   (a) the selected client was deleted out from under us
+  //   (b) the current draft no longer exists in the fresh tree
+  //   (c) the current draft was archived externally
   useEffect(() => {
     if (!selectedClient) return;
     const fresh = clients.find((c) => c.id === selectedClient.id);
-    if (!fresh) return;
+    if (!fresh) {
+      setSelectedClient(null);
+      setEditingProgram(null);
+      return;
+    }
     setSelectedClient(fresh);
-    const stillExists = editingProgram
-      ? fresh.programs.find((p) => p.id === editingProgram.id && p.status !== 'archived')
-      : null;
-    setEditingProgram(stillExists ?? activeProgramOf(fresh));
+    setEditingProgram((prev) => {
+      if (!prev) return activeProgramOf(fresh);
+      const stillActive = fresh.programs.find(
+        (p) => p.id === prev.id && p.status !== 'archived',
+      );
+      // Returning prev here causes React to bail out of the re-render —
+      // crucially, it leaves the user's in-flight keystrokes untouched.
+      return stillActive ? prev : activeProgramOf(fresh);
+    });
   }, [clients]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectClient = (client: Client) => {
+    // Persist whatever the coach was just typing on the previous client
+    // before we swap the editor over.
+    flushSave();
     setSelectedClient(client);
     setEditingProgram(activeProgramOf(client));
   };
@@ -90,6 +140,9 @@ export function AdminView({
         `Archive "${editingProgram.name}"? It will move to the trainee's history and you can build a new block.`,
       )
     ) return;
+    // Persist any keystrokes still in the debounce window before archiving,
+    // so we're not throwing away the coach's last edits.
+    flushSave();
     try {
       await onArchiveProgram(selectedClient.id, editingProgram.id);
       setEditingProgram(null);
@@ -116,12 +169,13 @@ export function AdminView({
 
   const handleProgramChange = (updated: Program) => {
     if (!selectedClient) return;
-    // Optimistic local update so the editor is responsive — onSaveProgram
-    // syncs to Supabase in the background and refetches the canonical tree.
+    // Optimistic local update — the editor renders instantly off this state.
     setEditingProgram(updated);
-    void onSaveProgram(updated).catch((err) => {
-      console.error('[IronTrack admin] saveProgram failed', err);
-    });
+    // Coalesce rapid keystrokes into a single Supabase write. The latest
+    // `updated` always wins because we replace pendingSaveRef each call.
+    pendingSaveRef.current = updated;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
   };
 
   const [inviteError, setInviteError] = useState<string | null>(null);

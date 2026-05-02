@@ -219,32 +219,22 @@ export function useProgramData(authenticatedUser: Client | null) {
       // — granular mutation hooks can be added in a later optimisation pass.
       await syncWeeks(program.id, program.weeks);
 
-      // Refetch only this program's tree and merge into clients[].
-      await refetchProgram(program.id);
+      // Merge the saved program into clients[] in place. We deliberately do
+      // NOT refetch the canonical tree here: the program object we just wrote
+      // IS the source of truth, and a refetch introduces a race where slow
+      // saves arrive in a different order than the user's keystrokes — the
+      // input would rubber-band back to a stale value mid-edit. Trusting the
+      // local copy keeps the editor responsive AND keeps clients[] coherent
+      // for the other views that read from it.
+      setClients((prev) => prev.map((c) => ({
+        ...c,
+        programs: c.programs.map((p) => (p.id === program.id ? program : p)),
+      })));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
-  const refetchProgram = useCallback(async (programId: string) => {
-    const { data, error } = await supabase
-      .from('programs')
-      .select(PROGRAM_TREE_SELECT)
-      .eq('id', programId)
-      .single<ProgramRow>();
-    if (error || !data) {
-      console.error('[IronTrack data] refetchProgram failed', error);
-      return;
-    }
-    const fresh = rowToProgram(data);
-    setClients((prev) => prev.map((c) =>
-      c.id === data.client_id
-        ? { ...c, programs: c.programs.map((p) => (p.id === fresh.id ? fresh : p)).concat(
-            c.programs.some((p) => p.id === fresh.id) ? [] : [fresh],
-          ) }
-        : c,
-    ));
-  }, []);
 
   const saveSession = useCallback(
     async (clientId: string, _programId: string, _weekId: string, day: WorkoutDay) => {
