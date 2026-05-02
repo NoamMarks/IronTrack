@@ -59,8 +59,39 @@
 }
 
 @layer base {
+  /*
+   * IronTrack atmosphere — powerlifting gym backdrop.
+   *
+   *   1. radial(top, crimson)   — competition-platform spotlight glow
+   *   2. radial(bottom-right, amber) — iron-on-iron heat / sweat warmth
+   *   3. radial(bottom-left, steel-blue) — cold steel undertone
+   *   4. SVG tile (barbell + 2 weight plates) repeated, ~3.5% opacity
+   *
+   * All four layers are fixed-attachment so they parallax behind scrolling
+   * content. The .light override below swaps to a lighter palette + darker
+   * stroke so the same atmosphere reads on a white theme.
+   */
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    background-image:
+      radial-gradient(ellipse 90% 60% at 50% -10%, rgba(220, 38, 38, 0.12) 0%, transparent 55%),
+      radial-gradient(ellipse 60% 60% at 110% 100%, rgba(245, 158, 11, 0.08) 0%, transparent 55%),
+      radial-gradient(ellipse 70% 60% at -10% 90%, rgba(56, 189, 248, 0.05) 0%, transparent 55%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180' fill='none' stroke='%23ffffff' stroke-opacity='0.035' stroke-width='1.4'%3E%3Cg%3E%3Crect x='40' y='84' width='100' height='4' rx='1.5'/%3E%3Crect x='32' y='74' width='6' height='24' rx='1'/%3E%3Crect x='24' y='79' width='4' height='14' rx='1'/%3E%3Crect x='142' y='74' width='6' height='24' rx='1'/%3E%3Crect x='152' y='79' width='4' height='14' rx='1'/%3E%3C/g%3E%3Ccircle cx='30' cy='30' r='14'/%3E%3Ccircle cx='30' cy='30' r='4'/%3E%3Ccircle cx='150' cy='150' r='11'/%3E%3Ccircle cx='150' cy='150' r='3.5'/%3E%3C/svg%3E");
+    background-attachment: fixed, fixed, fixed, fixed;
+    background-repeat: no-repeat, no-repeat, no-repeat, repeat;
+    background-size: 100% 100%, 100% 100%, 100% 100%, 180px 180px;
+    background-position: center, center, center, center;
+  }
+
+  /* Light theme: same composition with lighter accent tints + a darker
+     stroke on the plate/barbell tile so the texture stays visible. */
+  .light body {
+    background-image:
+      radial-gradient(ellipse 90% 60% at 50% -10%, rgba(220, 38, 38, 0.10) 0%, transparent 55%),
+      radial-gradient(ellipse 60% 60% at 110% 100%, rgba(245, 158, 11, 0.10) 0%, transparent 55%),
+      radial-gradient(ellipse 70% 60% at -10% 90%, rgba(56, 189, 248, 0.06) 0%, transparent 55%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180' fill='none' stroke='%23000000' stroke-opacity='0.05' stroke-width='1.4'%3E%3Cg%3E%3Crect x='40' y='84' width='100' height='4' rx='1.5'/%3E%3Crect x='32' y='74' width='6' height='24' rx='1'/%3E%3Crect x='24' y='79' width='4' height='14' rx='1'/%3E%3Crect x='142' y='74' width='6' height='24' rx='1'/%3E%3Crect x='152' y='79' width='4' height='14' rx='1'/%3E%3C/g%3E%3Ccircle cx='30' cy='30' r='14'/%3E%3Ccircle cx='30' cy='30' r='4'/%3E%3Ccircle cx='150' cy='150' r='11'/%3E%3Ccircle cx='150' cy='150' r='3.5'/%3E%3C/svg%3E");
   }
   /* Suppress browser-native focus outlines on all inputs/textareas site-wide.
      Focusable UI elements that need visible focus rings define them explicitly. */
