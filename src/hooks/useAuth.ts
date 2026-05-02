@@ -159,90 +159,85 @@ export function useAuth(): UseAuthReturn {
     }
     bootstrap();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (cancelled) return;
-        // try/catch/finally mirrors the bootstrap contract: any unexpected
-        // failure inside loadProfile / setState computation must NOT leave
-        // the UI stuck on "INITIALIZING...". The finally clause guarantees
-        // isLoading is cleared at the end of every event, just like bootstrap.
-        try {
-          const incomingUserId = session?.user?.id ?? null;
-          const previousUserId = currentUserIdRef.current;
+    // The actual handler runs OUTSIDE the supabase-js auth lock. The listener
+    // body itself is sync (returns immediately) and defers the async work
+    // through setTimeout. Why: supabase-js v2 calls _notifyAllSubscribers
+    // while still holding its internal auth lock, and awaits each callback.
+    // If our callback awaits a Supabase REST call (loadProfile), that REST
+    // call's getSession() re-enters the same lock and deadlocks. The
+    // setTimeout(0) trampoline lets _notifyAllSubscribers return, releasing
+    // the lock, before our async work fires.
+    const handleAuthStateChange = async (
+      event: string,
+      session: { user: { id: string; email?: string } } | null,
+    ) => {
+      if (cancelled) return;
+      try {
+        const incomingUserId = session?.user?.id ?? null;
+        const previousUserId = currentUserIdRef.current;
 
-          // ── Strict identity guard ───────────────────────────────────────
-          // TOKEN_REFRESHED, USER_UPDATED, and the synchronous INITIAL_SESSION
-          // re-emit all carry the SAME user id we already have hydrated.
-          // Re-running loadProfile + setState on each one was the root cause
-          // of the infinite re-render. Bail out early when nothing changed.
-          if (incomingUserId !== null && incomingUserId === previousUserId) {
-            return;
-          }
+        // ── Strict identity guard ───────────────────────────────────────
+        if (incomingUserId !== null && incomingUserId === previousUserId) {
+          return;
+        }
 
-          if (event === 'SIGNED_OUT' || !session?.user) {
-            currentUserIdRef.current = null;
-            // urlHasInvite() stays the single source of truth for invite
-            // routing — preserved from the prior fix.
-            const nextView: AppView = urlHasInvite() ? 'signup' : 'landing';
-            setState((prev) => {
-              // No-op bailout: if we're already in the logged-out shape the
-              // listener is being asked to reproduce, return prev so React
-              // skips the render. This is what closes the INITIAL_SESSION
-              // re-fire loop on a fresh page load with no session.
-              if (
-                prev.authenticatedUser === null &&
-                prev.impersonating === null &&
-                prev.loginError === '' &&
-                prev.view === nextView &&
-                !prev.isLoading
-              ) {
-                return prev;
-              }
-              return {
-                authenticatedUser: null,
-                view: nextView,
-                loginError: '',
-                impersonating: null,
-                isLoading: false,
-              };
-            });
-            return;
-          }
-
-          // SIGNED_IN / PASSWORD_RECOVERY for a NEW user id — hydrate.
-          const profile = await loadProfile(session.user.id, session.user.email ?? '');
-          if (cancelled) return;
-          if (!profile) {
-            currentUserIdRef.current = null;
-            // Auth session exists but profile is missing — treat as logged
-            // out so the UI doesn't render against a half-initialised user.
-            setState((prev) => ({
-              ...prev,
+        if (event === 'SIGNED_OUT' || !session?.user) {
+          currentUserIdRef.current = null;
+          const nextView: AppView = urlHasInvite() ? 'signup' : 'landing';
+          setState((prev) => {
+            if (
+              prev.authenticatedUser === null &&
+              prev.impersonating === null &&
+              prev.loginError === '' &&
+              prev.view === nextView &&
+              !prev.isLoading
+            ) {
+              return prev;
+            }
+            return {
               authenticatedUser: null,
-              loginError: 'Your account is missing a profile. Please contact your coach.',
-            }));
-            return;
-          }
-          currentUserIdRef.current = profile.id;
+              view: nextView,
+              loginError: '',
+              impersonating: null,
+              isLoading: false,
+            };
+          });
+          return;
+        }
+
+        const profile = await loadProfile(session.user.id, session.user.email ?? '');
+        if (cancelled) return;
+        if (!profile) {
+          currentUserIdRef.current = null;
           setState((prev) => ({
             ...prev,
-            authenticatedUser: profile,
-            // Pick a view if we don't have one yet; otherwise leave alone so the
-            // user stays on the page they were on (e.g. mid-navigation).
-            view: prev.authenticatedUser ? prev.view : viewForRole(profile.role),
-            loginError: '',
+            authenticatedUser: null,
+            loginError: 'Your account is missing a profile. Please contact your coach.',
           }));
-        } catch (err) {
-          console.error('[IronTrack auth] onAuthStateChange failure', err);
-        } finally {
-          if (!cancelled) {
-            // Always clear isLoading at the end of the callback — same
-            // contract as the bootstrap's finally clause. setState bails out
-            // when isLoading is already false (returning prev keeps render
-            // counts honest).
-            setState((prev) => (prev.isLoading ? { ...prev, isLoading: false } : prev));
-          }
+          return;
         }
+        currentUserIdRef.current = profile.id;
+        setState((prev) => ({
+          ...prev,
+          authenticatedUser: profile,
+          view: prev.authenticatedUser ? prev.view : viewForRole(profile.role),
+          loginError: '',
+        }));
+      } catch (err) {
+        console.error('[IronTrack auth] onAuthStateChange failure', err);
+      } finally {
+        if (!cancelled) {
+          setState((prev) => (prev.isLoading ? { ...prev, isLoading: false } : prev));
+        }
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        // Sync return — defer all real work outside the auth lock.
+        setTimeout(() => {
+          void handleAuthStateChange(event, session);
+        }, 0);
       },
     );
 
