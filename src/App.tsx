@@ -131,7 +131,7 @@ function LandingPage({
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <nav className="flex justify-between items-center p-6 border-b border-border">
         <div className="flex items-center space-x-3">
           <div className="w-8 h-8 bg-foreground flex items-center justify-center">
@@ -382,7 +382,7 @@ function AppShell({
   onDismissToast?: () => void;
 }) {
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen flex flex-col">
       {/* Impersonation banner */}
       {impersonating && (
         <div className="bg-amber-600 text-white px-4 py-2 text-xs font-mono uppercase tracking-widest flex justify-between items-center">
