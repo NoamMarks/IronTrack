@@ -173,19 +173,11 @@ export function WorkoutGridLogger({
     );
   };
 
-  const toggleCompleted = (id: string) => {
-    hapticTick();
-    setExercises((prev) =>
-      prev.map((ex) => {
-        if (ex.id !== id) return ex;
-        const next = !isCompleted(ex);
-        return {
-          ...ex,
-          values: { ...(ex.values ?? {}), [COMPLETED_KEY]: next ? '1' : '0' },
-        };
-      }),
-    );
-  };
+  // Note: the per-exercise `__completed` flag is no longer toggled by a
+  // UI button (the per-set Done toggles drive the visible completion
+  // state). Persistence via the COMPLETED_KEY in ex.values is preserved —
+  // any caller can still set it through the generic updateExercise(id,
+  // '__completed', '1') path, which lands in ex.values via the catch-all.
 
   const toggleSetDone = (id: string, setN: number) => {
     hapticTick();
@@ -258,17 +250,22 @@ export function WorkoutGridLogger({
         </button>
       </header>
 
-      {/* ── Workout-level progress bar ─────────────────────────────────────
-           Subtle gradient bar at the top of the scroll area — gives the
-           trainee an at-a-glance sense of "how much workout is left." */}
-      <div className="relative h-1.5 rounded-full bg-muted/40 overflow-hidden">
-        <motion.div
-          className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.5)]"
-          animate={{ width: `${progressPct}%` }}
-          transition={{ type: 'spring', stiffness: 180, damping: 24 }}
-        />
-        <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-mono tabular-nums text-foreground/80 mix-blend-difference">
-          {totalDone}/{totalSets}
+      {/* ── Workout-level progress ─────────────────────────────────────
+           A real bar + a separate count chip on the right so the numbers
+           read cleanly regardless of which color the bar is currently
+           painted in. */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
+          <motion.div
+            className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.5)]"
+            animate={{ width: `${progressPct}%` }}
+            transition={{ type: 'spring', stiffness: 180, damping: 24 }}
+          />
+        </div>
+        <div className="shrink-0 flex items-baseline gap-1 text-[10px] font-mono tabular-nums text-foreground/90">
+          <span className="font-bold">{totalDone}</span>
+          <span className="text-muted-foreground/70">/ {totalSets}</span>
+          <span className="text-muted-foreground/60 uppercase tracking-widest text-[9px] ml-1">sets</span>
         </div>
       </div>
 
@@ -379,21 +376,6 @@ export function WorkoutGridLogger({
                       <Upload className="w-4 h-4" />
                     </button>
                   )}
-
-                  <button
-                    onClick={() => toggleCompleted(ex.id)}
-                    aria-label={completed ? 'Mark as not done' : 'Mark exercise as done'}
-                    aria-pressed={completed}
-                    data-testid={`done-toggle-${ex.id}`}
-                    className={cn(
-                      'w-10 h-10 rounded-xl flex items-center justify-center border transition-all',
-                      completed
-                        ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 border-emerald-400/40 text-white shadow-md shadow-emerald-500/20'
-                        : 'bg-muted/40 border-border/40 text-muted-foreground hover:border-emerald-500/40 hover:text-emerald-400',
-                    )}
-                  >
-                    <Check className={cn('w-4 h-4 transition-transform', completed ? 'scale-100' : 'scale-90')} />
-                  </button>
                 </div>
               </header>
 
