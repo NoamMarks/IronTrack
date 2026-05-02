@@ -62,9 +62,11 @@ describe('WorkoutGridLogger', () => {
       />
     );
 
-    expect(screen.getByText('Log Session')).toBeInTheDocument();
+    // The day name is now the prominent H1, with client + week shown as
+    // a small monospace subtitle.
+    expect(screen.getByRole('heading', { name: /Lower Body A/i })).toBeInTheDocument();
     expect(screen.getByText(/Noam Marks/)).toBeInTheDocument();
-    expect(screen.getByText(/Lower Body A/)).toBeInTheDocument();
+    expect(screen.getByText(/Week 1/)).toBeInTheDocument();
   });
 
   it('condenses plan columns into a per-exercise summary string and renders one input row per planned set', () => {
