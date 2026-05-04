@@ -3,6 +3,9 @@ import { cn } from '../../lib/utils';
 interface TechnicalInputProps {
   value: string;
   onChange: (val: string) => void;
+  /** Final-value commit hook. Numeric cells use this to clamp [min, max] on
+   *  blur — see `clampOnCommit` in lib/numericInput.ts. */
+  onBlur?: (val: string) => void;
   placeholder?: string;
   className?: string;
   type?: string;
@@ -18,12 +21,15 @@ interface TechnicalInputProps {
   inputMode?: 'text' | 'decimal' | 'numeric' | 'tel' | 'email' | 'url' | 'search' | 'none';
   pattern?: string;
   autoComplete?: string;
+  'aria-valuemin'?: number;
+  'aria-valuemax'?: number;
   'data-testid'?: string;
 }
 
 export function TechnicalInput({
   value,
   onChange,
+  onBlur,
   placeholder,
   className,
   type = 'text',
@@ -33,6 +39,8 @@ export function TechnicalInput({
   inputMode,
   pattern,
   autoComplete,
+  'aria-valuemin': ariaValueMin,
+  'aria-valuemax': ariaValueMax,
   'data-testid': testId,
 }: TechnicalInputProps) {
   return (
@@ -40,6 +48,7 @@ export function TechnicalInput({
       type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur ? (e) => onBlur(e.target.value) : undefined}
       placeholder={placeholder}
       readOnly={readOnly}
       maxLength={maxLength}
@@ -47,6 +56,8 @@ export function TechnicalInput({
       inputMode={inputMode}
       pattern={pattern}
       autoComplete={autoComplete}
+      aria-valuemin={ariaValueMin}
+      aria-valuemax={ariaValueMax}
       data-testid={testId}
       className={cn(
         'bg-transparent border-none outline-none focus:ring-0 text-foreground font-mono text-sm w-full placeholder:text-muted-foreground',

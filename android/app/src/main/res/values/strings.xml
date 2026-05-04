@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">IronTrack</string>
+    <string name="title_activity_main">IronTrack</string>
+    <string name="package_name">com.irontrack.app</string>
+    <string name="custom_url_scheme">com.irontrack.app</string>
+</resources>

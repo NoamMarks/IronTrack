@@ -2,6 +2,13 @@ import { useState, useEffect } from 'react';
 import { Modal } from '../ui';
 import { cn } from '../../lib/utils';
 import { calculatePlates, getPlateColor, getPlateWidth } from '../../lib/plateCalculator';
+import {
+  RANGES,
+  sanitizeOnType,
+  clampOnCommit,
+  parseNumeric as parseNumericKind,
+  type NumericFieldKind,
+} from '../../lib/numericInput';
 
 interface PlateCalculatorProps {
   isOpen: boolean;
@@ -9,18 +16,6 @@ interface PlateCalculatorProps {
   initialWeight?: string;
   /** If provided, renders an "Apply Weight" button that emits the current target. */
   onApply?: (weight: string) => void;
-}
-
-/**
- * Strict numeric parser — returns `undefined` if the string cannot be interpreted
- * as a finite non-negative number. Crucially, `"0"` parses to `0`, not `undefined`,
- * so a user can explicitly zero out the bar or collars.
- */
-function parseNumeric(value: string): number | undefined {
-  if (value.trim() === '') return undefined;
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return undefined;
-  return n;
 }
 
 /** Block non-numeric characters (`e`, `+`, `-`, letters) in number inputs. */
@@ -39,46 +34,55 @@ export function PlateCalculator({ isOpen, onClose, initialWeight = '', onApply }
     if (isOpen) setTargetInput(initialWeight);
   }, [isOpen, initialWeight]);
 
-  const target = parseNumeric(targetInput) ?? 0;
-  const bar = parseNumeric(barWeight) ?? 20;
-  // Default to 2.5 only when the field is *empty* — an explicit 0 means no collars.
-  const collar = parseNumeric(collarWeight) ?? 2.5;
+  // Each field clamps independently — see RANGES in lib/numericInput.ts.
+  // Defaults match competition standard equipment so a fresh modal renders
+  // a usable layout immediately.
+  const target = parseNumericKind(targetInput, 'load') ?? 0;
+  const bar = parseNumericKind(barWeight, 'bar') ?? 20;
+  // Empty collar field means "no collars" rather than the default — but we
+  // still treat the unparseable case as default 2.5 to keep visual layout sane.
+  const collar = collarWeight.trim() === '' ? 2.5 : (parseNumericKind(collarWeight, 'collar') ?? 0);
 
   const result = calculatePlates(target, bar, collar);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Plate Calculator">
       <div className="space-y-6">
-        {/* Inputs */}
+        {/* Inputs — each one bound to a NumericFieldKind so they share the
+            same overflow / decimals / clamp rules as the rest of the app. */}
         <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: 'Target (kg)', value: targetInput, set: setTargetInput, testId: 'plate-target' },
-            { label: 'Bar (kg)', value: barWeight, set: setBarWeight, testId: 'plate-bar' },
-            { label: 'Collars (kg)', value: collarWeight, set: setCollarWeight, testId: 'plate-collar' },
-          ].map(({ label, value, set, testId }) => (
-            <div key={label} className="space-y-1">
-              <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
-                {label}
-              </label>
-              <div className="bg-muted/30 p-3 border border-border">
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  inputMode="decimal"
-                  value={value}
-                  onChange={(e) => set(e.target.value)}
-                  onKeyDown={blockInvalidNumberKeys}
-                  placeholder="0"
-                  data-testid={testId}
-                  className={cn(
-                    'bg-transparent border-none outline-none focus:ring-0 text-foreground font-mono text-sm w-full text-center placeholder:text-muted-foreground',
-                    '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
-                  )}
-                />
+          {([
+            { label: 'Target (kg)',  value: targetInput, set: setTargetInput, testId: 'plate-target', kind: 'load'   },
+            { label: 'Bar (kg)',     value: barWeight,    set: setBarWeight,    testId: 'plate-bar',    kind: 'bar'    },
+            { label: 'Collars (kg)', value: collarWeight, set: setCollarWeight, testId: 'plate-collar', kind: 'collar' },
+          ] as Array<{ label: string; value: string; set: (v: string) => void; testId: string; kind: NumericFieldKind }>).map(({ label, value, set, testId, kind }) => {
+            const range = RANGES[kind];
+            return (
+              <div key={label} className="space-y-1">
+                <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                  {label}
+                </label>
+                <div className="bg-muted/30 p-3 border border-border">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9.]*"
+                    value={value}
+                    onChange={(e) => set(sanitizeOnType(e.target.value, kind))}
+                    onBlur={(e) => set(clampOnCommit(e.target.value, kind))}
+                    onKeyDown={blockInvalidNumberKeys}
+                    placeholder="0"
+                    aria-valuemin={range.min}
+                    aria-valuemax={range.max}
+                    data-testid={testId}
+                    className={cn(
+                      'bg-transparent border-none outline-none focus:ring-0 text-foreground font-mono text-sm w-full text-center placeholder:text-muted-foreground'
+                    )}
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Barbell visualization — overflow-x-auto prevents huge weights from
@@ -154,13 +158,15 @@ export function PlateCalculator({ isOpen, onClose, initialWeight = '', onApply }
           </p>
         )}
 
-        {/* Apply action — only shown when the modal was opened from a logger row */}
+        {/* Apply action — only shown when the modal was opened from a logger row.
+            Emits the COMMIT-clamped value so a downstream input never receives
+            a partial-typing string like "8." or anything > 1000 kg. */}
         {onApply && (
           <button
             type="button"
-            onClick={() => onApply(targetInput)}
+            onClick={() => onApply(clampOnCommit(targetInput, 'load'))}
             data-testid="plate-apply-btn"
-            disabled={parseNumeric(targetInput) === undefined}
+            disabled={parseNumericKind(targetInput, 'load') === null}
             className={cn(
               'btn-press w-full py-3 text-xs font-bold uppercase tracking-widest rounded-input',
               'bg-accent text-accent-foreground hover:opacity-90',

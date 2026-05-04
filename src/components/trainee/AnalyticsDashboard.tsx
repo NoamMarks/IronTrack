@@ -1,5 +1,12 @@
 import { useState, useMemo, useEffect } from 'react';
-import { TrendingUp, AlertCircle } from 'lucide-react';
+import {
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Trophy,
+  Sparkles,
+  AlertCircle,
+} from 'lucide-react';
 import { motion } from 'motion/react';
 import {
   AreaChart,
@@ -12,7 +19,7 @@ import {
 } from 'recharts';
 import { TechnicalCard } from '../ui';
 import { cn } from '../../lib/utils';
-import { aggregateE1RM, listLoggedExercises } from '../../lib/analytics';
+import { aggregateE1RM, listLoggedExercises, personalRecord } from '../../lib/analytics';
 import type { Client } from '../../types';
 
 interface AnalyticsDashboardProps {
@@ -37,6 +44,23 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
     () => (selectedExerciseId ? aggregateE1RM(client, selectedExerciseId) : []),
     [client, selectedExerciseId]
   );
+
+  // Stat strip data — three at-a-glance numbers above the chart so the user
+  // doesn't have to eyeball the line to know where they're at:
+  //   - PR: highest e1RM ever (date-stamped via `personalRecord`)
+  //   - Latest: the most recent session's e1RM
+  //   - Δ: latest minus the one before it (the "did I push past last session"
+  //        signal, which is a tighter read than a rolling chart)
+  const pr = useMemo(
+    () => (selectedExerciseId ? personalRecord(client, selectedExerciseId) : null),
+    [client, selectedExerciseId]
+  );
+  const latestE1rm = e1rmData.length > 0 ? e1rmData[e1rmData.length - 1] : null;
+  const previousE1rm = e1rmData.length > 1 ? e1rmData[e1rmData.length - 2] : null;
+  const sessionDelta =
+    latestE1rm && previousE1rm
+      ? Math.round((latestE1rm.e1rm - previousE1rm.e1rm) * 10) / 10
+      : null;
 
   return (
     <div className="space-y-10" data-testid="analytics-dashboard">
@@ -80,6 +104,68 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
             )}
           </div>
 
+          {/* Stat strip — only renders when we have at least one session.
+              Hides cleanly on first-load empty state. */}
+          {e1rmData.length > 0 && (
+            <div
+              data-testid="e1rm-stat-strip"
+              className="grid grid-cols-3 gap-3"
+            >
+              <StatCell
+                icon={<Trophy className="w-3.5 h-3.5" />}
+                label="Personal best"
+                primary={pr ? `${pr.e1rm} kg` : '—'}
+                secondary={pr ? `${pr.load} kg × ${pr.reps} · ${pr.date}` : 'No PR yet'}
+                tone="amber"
+                testId="stat-pr"
+              />
+              <StatCell
+                icon={<Sparkles className="w-3.5 h-3.5" />}
+                label="Latest e1RM"
+                primary={latestE1rm ? `${latestE1rm.e1rm} kg` : '—'}
+                secondary={latestE1rm ? latestE1rm.date : 'No data'}
+                tone="emerald"
+                testId="stat-latest"
+              />
+              <StatCell
+                icon={
+                  sessionDelta == null ? (
+                    <Minus className="w-3.5 h-3.5" />
+                  ) : sessionDelta > 0 ? (
+                    <TrendingUp className="w-3.5 h-3.5" />
+                  ) : sessionDelta < 0 ? (
+                    <TrendingDown className="w-3.5 h-3.5" />
+                  ) : (
+                    <Minus className="w-3.5 h-3.5" />
+                  )
+                }
+                label="vs previous"
+                primary={
+                  sessionDelta == null
+                    ? '—'
+                    : sessionDelta > 0
+                      ? `+${sessionDelta} kg`
+                      : sessionDelta < 0
+                        ? `${sessionDelta} kg`
+                        : 'same'
+                }
+                secondary={
+                  previousE1rm ? `was ${previousE1rm.e1rm} kg · ${previousE1rm.date}` : 'First session'
+                }
+                tone={
+                  sessionDelta == null
+                    ? 'muted'
+                    : sessionDelta > 0
+                      ? 'emerald'
+                      : sessionDelta < 0
+                        ? 'amber'
+                        : 'muted'
+                }
+                testId="stat-delta"
+              />
+            </div>
+          )}
+
           {e1rmData.length === 0 ? (
             <EmptyChart message="No logged actuals yet — log a session to see your e1RM trend." />
           ) : (
@@ -121,6 +207,60 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
         </div>
       </TechnicalCard>
 
+    </div>
+  );
+}
+
+/**
+ * Compact stat tile for the strip above the chart. Three of these read in
+ * a glance: PR / latest / delta — answering "where am I now" without
+ * decoding the line.
+ */
+function StatCell({
+  icon,
+  label,
+  primary,
+  secondary,
+  tone,
+  testId,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  primary: string;
+  secondary: string;
+  tone: 'emerald' | 'amber' | 'muted';
+  testId: string;
+}) {
+  const ring =
+    tone === 'emerald'
+      ? 'border-emerald-500/30 bg-emerald-500/[0.06]'
+      : tone === 'amber'
+        ? 'border-amber-500/30 bg-amber-500/[0.06]'
+        : 'border-border/50 bg-muted/20';
+  const accent =
+    tone === 'emerald'
+      ? 'text-emerald-300'
+      : tone === 'amber'
+        ? 'text-amber-300'
+        : 'text-muted-foreground';
+  return (
+    <div
+      data-testid={testId}
+      className={cn(
+        'rounded-xl border p-3 md:p-4 flex flex-col gap-1',
+        ring,
+      )}
+    >
+      <div className={cn('flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.14em]', accent)}>
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div className="text-lg md:text-xl font-bold tabular-nums tracking-tight text-foreground">
+        {primary}
+      </div>
+      <div className="text-[10px] font-mono text-muted-foreground/70 truncate" title={secondary}>
+        {secondary}
+      </div>
     </div>
   );
 }

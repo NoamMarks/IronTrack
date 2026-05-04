@@ -1,12 +1,13 @@
 {
   "name": "irontrack",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "version:patch": "npm version patch --no-git-tag-version",
-    "prebuild": "npm run version:patch",
+    "version:android": "node scripts/release/bump-version-code.mjs",
+    "prebuild": "npm run version:patch && npm run version:android",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
@@ -17,6 +18,15 @@
     "test:full": "bash scripts/test-full.sh"
   },
   "dependencies": {
+    "@capacitor-community/keep-awake": "^5.0.1",
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/app": "^6.0.3",
+    "@capacitor/cli": "^6.2.1",
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/haptics": "^6.0.3",
+    "@capacitor/preferences": "^6.0.4",
+    "@capacitor/splash-screen": "^6.0.4",
+    "@capacitor/status-bar": "^6.0.3",
     "@supabase/supabase-js": "^2.105.1",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",

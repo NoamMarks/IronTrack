@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'motion/react';
 
 import { useAuth } from './hooks/useAuth';
 import { useProgramData } from './hooks/useProgramData';
+import { useDeepLinks } from './hooks/useDeepLinks';
+import { isNative } from './lib/platform';
 import { supabase } from './lib/supabase';
 import { TechnicalCard, TechnicalInput, Modal, Toast } from './components/ui';
 import { AdminView } from './components/admin/AdminView';
@@ -446,6 +448,8 @@ function AppShell({
 // ─── Root App ────────────────────────────────────────────────────────────────
 
 export default function App() {
+  // Native deep-link listener — no-op on web.
+  useDeepLinks();
   const { authenticatedUser, view, loginError, isLoading: isAuthLoading, login, logout, setView, impersonating, impersonate, stopImpersonating } = useAuth();
   const {
     clients,
@@ -492,6 +496,19 @@ export default function App() {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     document.documentElement.classList.toggle('light', theme === 'light');
     localStorage.setItem('irontrack_theme', theme);
+
+    // Native: tint the system status bar to match the active theme so the
+    // Android pull-down area doesn't sit as a light strip on a dark UI (or
+    // vice versa). Lazy-import keeps the web build from pulling in the
+    // plugin unnecessarily.
+    if (isNative()) {
+      void import('@capacitor/status-bar').then(({ StatusBar, Style }) => {
+        void StatusBar.setStyle({ style: theme === 'dark' ? Style.Dark : Style.Light }).catch(() => {});
+        void StatusBar.setBackgroundColor({
+          color: theme === 'dark' ? '#09090b' : '#ffffff',
+        }).catch(() => {});
+      }).catch(() => {});
+    }
   }, [theme]);
 
   // Magic-link routing now happens synchronously inside useAuth's state

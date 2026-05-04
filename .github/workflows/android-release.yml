@@ -1,0 +1,97 @@
+name: Android Release
+
+# Tagged releases (release/v1.2.3) build a signed AAB suitable for upload to
+# Play Console. Tag pushes are the *only* way this workflow runs — pushes to
+# main never produce store artifacts.
+on:
+  push:
+    tags:
+      - 'release/v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-aab:
+    name: Build signed AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build web bundle
+        # The prebuild hook bumps package.json patch + propagates the
+        # versionCode/versionName into android/app/build.gradle.
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Capacitor sync
+        run: npx cap sync android
+
+      - name: Decode signing keystore
+        # The upload keystore is stored in GitHub Secrets as base64. Decode
+        # to a path under the runner's home directory; the env block on the
+        # gradle step points ANDROID_KEYSTORE_PATH at this file.
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > $RUNNER_TEMP/upload-keystore.jks
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/upload-keystore.jks" >> $GITHUB_ENV
+
+      - name: Assemble release AAB
+        working-directory: android
+        run: ./gradlew bundleRelease --stacktrace
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: irontrack-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 90
+
+      # Optional: when ready, uncomment to push to the Play Console internal
+      # track automatically. Requires a service-account JSON in
+      # PLAY_SERVICE_ACCOUNT_JSON and the package to already exist on Play.
+      #
+      # - name: Upload to Play Console internal track
+      #   uses: r0adkll/upload-google-play@v1
+      #   with:
+      #     serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+      #     packageName: com.irontrack.app
+      #     releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+      #     track: internal
+      #     status: completed

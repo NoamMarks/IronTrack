@@ -1,10 +1,35 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { KeepAwake } from '@capacitor-community/keep-awake';
+import { isNative } from '../lib/platform';
 
+/**
+ * Keep-the-screen-on hook for Gym Mode.
+ *
+ * Two backends:
+ *   - **Native (Capacitor):** `@capacitor-community/keep-awake` holds an
+ *     Android `WindowManager.FLAG_KEEP_SCREEN_ON` flag. Reliable, supported
+ *     on every Android version we target.
+ *   - **Web:** the standard `navigator.wakeLock` API, gated on browser
+ *     support. Returns a `WakeLockSentinel` that we release on unmount /
+ *     toggle / visibility change.
+ *
+ * Either way, the UI just calls `toggle()` and reads `isActive` — the
+ * branching stays inside this hook.
+ */
 export function useWakeLock() {
   const [isActive, setIsActive] = useState(false);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   const request = useCallback(async () => {
+    if (isNative()) {
+      try {
+        await KeepAwake.keepAwake();
+        setIsActive(true);
+      } catch {
+        setIsActive(false);
+      }
+      return;
+    }
     if (!('wakeLock' in navigator)) return;
     try {
       wakeLockRef.current = await navigator.wakeLock.request('screen');
@@ -16,6 +41,15 @@ export function useWakeLock() {
   }, []);
 
   const release = useCallback(async () => {
+    if (isNative()) {
+      try {
+        await KeepAwake.allowSleep();
+      } catch {
+        /* ignore */
+      }
+      setIsActive(false);
+      return;
+    }
     if (wakeLockRef.current) {
       await wakeLockRef.current.release();
       wakeLockRef.current = null;
@@ -31,8 +65,8 @@ export function useWakeLock() {
     }
   }, [isActive, request, release]);
 
-  // Re-acquire on visibility change (tab back in)
   useEffect(() => {
+    if (isNative()) return;
     const handleVisibility = () => {
       if (document.visibilityState === 'visible' && isActive && !wakeLockRef.current) {
         void request();
@@ -42,10 +76,15 @@ export function useWakeLock() {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [isActive, request]);
 
-  // Cleanup on unmount
   useEffect(() => {
-    return () => { void release(); };
+    return () => {
+      void release();
+    };
   }, [release]);
 
-  return { isActive, toggle, isSupported: 'wakeLock' in navigator };
+  return {
+    isActive,
+    toggle,
+    isSupported: isNative() || 'wakeLock' in navigator,
+  };
 }

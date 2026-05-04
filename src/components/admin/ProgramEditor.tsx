@@ -4,6 +4,7 @@ import { TechnicalCard, TechnicalInput } from '../ui';
 import { ColumnModal } from './ColumnModal';
 import { cn } from '../../lib/utils';
 import { DEFAULT_COLUMNS } from '../../constants/mockData';
+import { sanitizeOnType, clampOnCommit, kindForColumnId, RANGES } from '../../lib/numericInput';
 import type { Program, ProgramColumn, ExercisePlan } from '../../types';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
@@ -191,12 +192,19 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
     dayId: string,
     exId: string,
     field: string,
-    value: string
+    rawValue: string
   ) => {
     const day = program.weeks.find((w) => w.id === weekId)?.days.find((d) => d.id === dayId);
     if (!day) return;
     const exIndex = day.exercises.findIndex((ex) => ex.id === exId);
     if (exIndex === -1) return;
+
+    // Sanitize numeric plan/actual columns. Free-text columns (exerciseName,
+    // weightRange like "70-80kg", custom UUID columns, notes) flow through
+    // unchanged. Without this, a coach could type "9999999" into the sets
+    // column and the trainee would inherit the garbage.
+    const kind = kindForColumnId(field);
+    const value = kind ? sanitizeOnType(rawValue, kind) : rawValue;
 
     const legacyFields = ['exerciseName', 'sets', 'reps', 'expectedRpe', 'weightRange'];
     const isPlanField = !['actualLoad', 'actualRpe', 'notes', 'videoUrl'].includes(field);
@@ -225,6 +233,22 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
         ),
       })),
     });
+  };
+
+  /** Final clamp on blur for numeric program-editor cells. Without this, a
+   *  coach who types "0" into RPE and tabs away leaves it below the 1.0
+   *  floor. Free-text columns get no-op'd. */
+  const commitExerciseField = (
+    weekId: string,
+    dayId: string,
+    exId: string,
+    field: string,
+    raw: string,
+  ) => {
+    const kind = kindForColumnId(field);
+    if (!kind) return;
+    const cleaned = clampOnCommit(raw, kind);
+    if (cleaned !== raw) updateExercise(weekId, dayId, exId, field, cleaned);
   };
 
   const deleteExercise = (weekId: string, dayId: string, exId: string) => {
@@ -398,6 +422,8 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
 
                             {allCols.map((col) => {
                               const cellValue = String(getExerciseValue(ex, col.id) ?? '');
+                              const colKind = kindForColumnId(col.id);
+                              const colRange = colKind ? RANGES[colKind] : null;
                               return (
                                 <div key={col.id} className="flex justify-center min-w-0">
                                   {col.type === 'plan' ? (
@@ -406,7 +432,19 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
                                       onChange={(val) =>
                                         updateExercise(week.id, day.id, ex.id, col.id, val)
                                       }
-                                      maxLength={150}
+                                      onBlur={
+                                        colKind
+                                          ? (val) => commitExerciseField(week.id, day.id, ex.id, col.id, val)
+                                          : undefined
+                                      }
+                                      // Numeric columns get a tighter character cap and the
+                                      // mobile decimal keypad. 6 chars holds "1000.0" / "100" /
+                                      // "20" / "10.5" comfortably.
+                                      maxLength={colKind ? 6 : 150}
+                                      inputMode={colKind ? 'decimal' : undefined}
+                                      pattern={colKind ? '[0-9.]*' : undefined}
+                                      aria-valuemin={colRange?.min}
+                                      aria-valuemax={colRange?.max}
                                       title={cellValue}
                                       className="text-center overflow-hidden text-ellipsis whitespace-nowrap"
                                       placeholder="..."

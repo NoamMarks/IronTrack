@@ -11,6 +11,10 @@ import {
   Cloud,
   CloudOff,
   Loader2,
+  History,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TechnicalCard } from '../ui';
@@ -18,6 +22,12 @@ import { cn } from '../../lib/utils';
 import { DEFAULT_COLUMNS } from '../../constants/mockData';
 import { PlateCalculator } from './PlateCalculator';
 import { hapticTick, hapticSuccess } from '../../lib/haptics';
+import { sanitizeOnType, clampOnCommit, parseNumeric } from '../../lib/numericInput';
+import {
+  findPreviousWeekExercise,
+  getPreviousSetLoad,
+  getPreviousSetRpe,
+} from '../../lib/progressiveOverload';
 import type { Client, Program, WorkoutWeek, WorkoutDay, ExercisePlan, ProgramColumn } from '../../types';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -230,14 +240,28 @@ export function WorkoutGridLogger({
    *  keep working. New per-set keys (`set_<n>_load`, `set_<n>_rpe`,
    *  `set_<n>_completed`) drop into ex.values automatically. Set-1 numeric
    *  writes also mirror to legacy ex.actualLoad / ex.actualRpe so analytics
-   *  views stay coherent. */
-  const updateExercise = (id: string, field: string, value: string) => {
+   *  views stay coherent.
+   *
+   *  Numeric fields are sanitized through `sanitizeOnType` before they hit
+   *  state — this is what stops a trainee from typing "9999999" into a kg
+   *  field or "13" into RPE. The sanitizer enforces max + character class;
+   *  the matching `clampOnCommit` runs on blur (via `commitField` below)
+   *  so the final stored value also satisfies min. */
+  const setMatchRegex = /^set_(\d+)_(load|rpe)$/;
+  const updateExercise = (id: string, field: string, rawValue: string) => {
+    const setMatch = field.match(setMatchRegex);
+    let value = rawValue;
+    if (setMatch?.[2] === 'load' || field === 'actualLoad') {
+      value = sanitizeOnType(rawValue, 'load');
+    } else if (setMatch?.[2] === 'rpe' || field === 'actualRpe') {
+      value = sanitizeOnType(rawValue, 'rpe');
+    }
+
     if (['actualLoad', 'actualRpe'].includes(field) && value.trim() !== '') {
       hapticTick();
     }
     hasUserEditedRef.current = true;
     editVersionRef.current += 1;
-    const setMatch = field.match(/^set_(\d+)_(load|rpe)$/);
     setExercises((prev) =>
       prev.map((ex) => {
         if (ex.id !== id) return ex;
@@ -255,6 +279,21 @@ export function WorkoutGridLogger({
         return next;
       }),
     );
+  };
+
+  /** Final clamp on blur. Without this, a trainee who types "0.5" and tabs
+   *  away would leave RPE at 0.5 (below the 1.0 floor). */
+  const commitField = (id: string, field: string, raw: string) => {
+    const setMatch = field.match(setMatchRegex);
+    let cleaned = raw;
+    if (setMatch?.[2] === 'load' || field === 'actualLoad') {
+      cleaned = clampOnCommit(raw, 'load');
+    } else if (setMatch?.[2] === 'rpe' || field === 'actualRpe') {
+      cleaned = clampOnCommit(raw, 'rpe');
+    } else {
+      return;
+    }
+    if (cleaned !== raw) updateExercise(id, field, cleaned);
   };
 
   // Note: the per-exercise `__completed` flag is no longer toggled by a
@@ -395,6 +434,18 @@ export function WorkoutGridLogger({
           const setsDone = countDoneSets(ex);
           const allSetsDone = sets > 0 && setsDone === sets;
           const notesValue = ex.notes ?? '';
+          // Progressive-overload reference: walks back to the most recent
+          // prior week with logged data for this `(dayNumber, exerciseName)`.
+          // Returns `{ exercise, fromWeekNumber }` so the chip can label
+          // "Last week" vs an honest "Week 1" when the trainee skipped a week.
+          const prevSession = findPreviousWeekExercise(
+            program,
+            week.weekNumber,
+            day.dayNumber,
+            ex.exerciseName,
+          );
+          const isLiteralLastWeek =
+            prevSession !== null && prevSession.fromWeekNumber === week.weekNumber - 1;
 
           return (
             <motion.section
@@ -505,18 +556,33 @@ export function WorkoutGridLogger({
                   const setDone = isSetDone(ex, setN);
                   const loadFilled = loadValue.trim() !== '';
                   const rpeFilled = rpeValue.trim() !== '';
+                  // Per-set values from the matched prior session. Show
+                  // them only when at least one of (load, rpe) was logged
+                  // — empty sets from prior weeks aren't a useful reference.
+                  const prevLoad = getPreviousSetLoad(prevSession, setN);
+                  const prevRpe = getPreviousSetRpe(prevSession, setN);
+                  const hasPrev = prevLoad !== null || prevRpe !== null;
+                  // Delta vs current load: enables the ↑/=/↓ trend arrow.
+                  // Only meaningful once the trainee has typed today's load.
+                  const currentLoadNum = parseNumeric(loadValue, 'load');
+                  const prevLoadNum = prevLoad !== null ? parseNumeric(prevLoad, 'load') : null;
+                  const loadDelta =
+                    currentLoadNum !== null && prevLoadNum !== null && prevLoadNum > 0
+                      ? Math.round((currentLoadNum - prevLoadNum) * 10) / 10
+                      : null;
 
                   return (
                     <div
                       key={setN}
                       data-testid={`set-row-${ex.id}-${setN}`}
                       className={cn(
-                        'flex items-center gap-2 px-3 md:px-4 py-2.5 md:py-3 transition-colors',
+                        'flex flex-col gap-1 px-3 md:px-4 py-2.5 md:py-3 transition-colors',
                         setDone
                           ? 'bg-emerald-500/[0.07]'
                           : 'hover:bg-white/[0.02]',
                       )}
                     >
+                      <div className="flex items-center gap-2">
                       {/* Set badge */}
                       <div
                         className={cn(
@@ -546,13 +612,16 @@ export function WorkoutGridLogger({
                           type="text"
                           value={loadValue}
                           onChange={(e) => updateExercise(ex.id, setLoadKey(setN), e.target.value)}
+                          onBlur={(e) => commitField(ex.id, setLoadKey(setN), e.target.value)}
                           placeholder="0"
-                          maxLength={10}
+                          maxLength={6}
                           inputMode="decimal"
-                          pattern="[0-9]*"
+                          pattern="[0-9.]*"
                           autoComplete="off"
                           data-testid={`input-${ex.id}-set-${setN}-load`}
                           aria-label={`Set ${setN} weight`}
+                          aria-valuemin={0}
+                          aria-valuemax={1000}
                           className={cn(
                             'bg-transparent w-full outline-none border-none focus:ring-0',
                             'text-base md:text-lg font-bold tabular-nums tracking-tight',
@@ -593,13 +662,16 @@ export function WorkoutGridLogger({
                           type="text"
                           value={rpeValue}
                           onChange={(e) => updateExercise(ex.id, setRpeKey(setN), e.target.value)}
+                          onBlur={(e) => commitField(ex.id, setRpeKey(setN), e.target.value)}
                           placeholder="—"
-                          maxLength={5}
+                          maxLength={4}
                           inputMode="decimal"
-                          pattern="[0-9]*"
+                          pattern="[0-9.]*"
                           autoComplete="off"
                           data-testid={`input-${ex.id}-set-${setN}-rpe`}
                           aria-label={`Set ${setN} RPE`}
+                          aria-valuemin={1}
+                          aria-valuemax={10}
                           className={cn(
                             'bg-transparent w-full outline-none border-none focus:ring-0',
                             'text-base md:text-lg font-bold tabular-nums tracking-tight',
@@ -638,6 +710,48 @@ export function WorkoutGridLogger({
                           </motion.span>
                         </AnimatePresence>
                       </button>
+                      </div>
+
+                      {/* Progressive-overload reference: most recent prior
+                          session's same-set numbers, plus a ↑/=/↓ delta
+                          once the trainee has entered today's load. Hidden
+                          when there's no prior data so fresh week-1
+                          sessions stay clean. */}
+                      {hasPrev && prevSession && (
+                        <div
+                          data-testid={`prev-week-${ex.id}-${setN}`}
+                          data-prev-week-number={prevSession.fromWeekNumber}
+                          className="
+                            ml-11 md:ml-12 mr-1 -mt-0.5
+                            flex items-center gap-1.5 flex-wrap
+                            text-[10px] md:text-[11px] font-mono tabular-nums
+                            text-muted-foreground/70
+                          "
+                        >
+                          <History className="w-3 h-3 opacity-60 shrink-0" />
+                          <span className="opacity-70 uppercase tracking-[0.14em]">
+                            {isLiteralLastWeek
+                              ? 'Last week'
+                              : `Week ${prevSession.fromWeekNumber}`}
+                          </span>
+                          {prevLoad !== null && (
+                            <span className="text-foreground/70">
+                              {prevLoad}<span className="opacity-60"> kg</span>
+                            </span>
+                          )}
+                          {prevLoad !== null && prevRpe !== null && (
+                            <span className="opacity-40">·</span>
+                          )}
+                          {prevRpe !== null && (
+                            <span className="text-foreground/70">
+                              <span className="opacity-60">RPE </span>{prevRpe}
+                            </span>
+                          )}
+                          {loadDelta !== null && (
+                            <DeltaBadge delta={loadDelta} testId={`prev-week-delta-${ex.id}-${setN}`} />
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -790,6 +904,58 @@ function SaveStatusBadge({
       {cfg.icon}
       <span>{cfg.text}</span>
     </div>
+  );
+}
+
+/**
+ * Inline trend badge for the per-set "last week" chip. Reads the *load*
+ * delta vs the prior session and renders one of:
+ *   ↑ +5 kg   (gain — emerald)
+ *   = same    (matched — muted)
+ *   ↓ -2.5 kg (drop — amber)
+ *
+ * Surfaced only once the trainee has typed today's load — until then there's
+ * nothing to compare to. RPE deltas are intentionally NOT plotted here:
+ * "lower RPE at the same weight = improvement" is the right signal for RPE,
+ * but it requires the load to be *equal*, which adds branching that hurts
+ * gym-floor readability. Load alone is the dominant progressive-overload cue.
+ */
+function DeltaBadge({ delta, testId }: { delta: number; testId: string }) {
+  if (delta > 0) {
+    return (
+      <span
+        data-testid={testId}
+        data-delta-direction="up"
+        className="inline-flex items-center gap-0.5 px-1.5 py-px rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+      >
+        <TrendingUp className="w-2.5 h-2.5" />
+        <span>+{delta}</span>
+        <span className="opacity-60"> kg</span>
+      </span>
+    );
+  }
+  if (delta < 0) {
+    return (
+      <span
+        data-testid={testId}
+        data-delta-direction="down"
+        className="inline-flex items-center gap-0.5 px-1.5 py-px rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300"
+      >
+        <TrendingDown className="w-2.5 h-2.5" />
+        <span>{delta}</span>
+        <span className="opacity-60"> kg</span>
+      </span>
+    );
+  }
+  return (
+    <span
+      data-testid={testId}
+      data-delta-direction="same"
+      className="inline-flex items-center gap-0.5 px-1.5 py-px rounded-full border border-border/50 bg-muted/30 text-muted-foreground"
+    >
+      <Minus className="w-2.5 h-2.5" />
+      <span>same</span>
+    </span>
   );
 }
 

@@ -37,3 +37,9 @@ Thumbs.db
 *.swp
 
 .vercel
+
+# Android signing — NEVER commit. CI decodes from base64 secret at build time.
+*.jks
+*.keystore
+android/key.properties
+android/app/google-services.json
