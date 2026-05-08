@@ -45,3 +45,21 @@ export const hapticAlarm = (): void => {
   }
   webBuzz([120, 60, 120, 60, 200]);
 };
+
+/** Heavy thump — committal action like "Finish Workout". */
+export const hapticHeavy = (): void => {
+  if (isNative()) {
+    void Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {});
+    return;
+  }
+  webBuzz([80]);
+};
+
+/** Soft tap — navigation between weeks / days in the dashboard. */
+export const hapticNav = (): void => {
+  if (isNative()) {
+    void Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+    return;
+  }
+  webBuzz(15);
+};

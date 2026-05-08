@@ -7,6 +7,7 @@
     "dev": "vite",
     "version:patch": "npm version patch --no-git-tag-version",
     "version:android": "node scripts/release/bump-version-code.mjs",
+    "icons:generate": "pwa-assets-generator --config pwa-assets.config.ts",
     "prebuild": "npm run version:patch && npm run version:android",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
@@ -24,6 +25,7 @@
     "@capacitor/cli": "^6.2.1",
     "@capacitor/core": "^6.2.1",
     "@capacitor/haptics": "^6.0.3",
+    "@capacitor/ios": "^6.2.1",
     "@capacitor/preferences": "^6.0.4",
     "@capacitor/splash-screen": "^6.0.4",
     "@capacitor/status-bar": "^6.0.3",
@@ -49,6 +51,7 @@
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "@vercel/node": "^5.7.15",
+    "@vite-pwa/assets-generator": "^1.0.2",
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^4.1.2",
     "autoprefixer": "^10.4.19",
@@ -60,6 +63,7 @@
     "tailwindcss": "^3.4.3",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
+    "vite-plugin-pwa": "^1.3.0",
     "vitest": "^4.1.2"
   }
 }

@@ -1,6 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Dumbbell, ShieldCheck, Sun, Moon, UserPlus, X, ChevronRight, Users, ArrowLeft } from 'lucide-react';
+import {
+  Dumbbell,
+  ShieldCheck,
+  Sun,
+  Moon,
+  UserPlus,
+  X,
+  ChevronRight,
+  Users,
+  ArrowLeft,
+  LogIn,
+  BarChart3,
+  ClipboardList,
+  Layers,
+  TrendingUp,
+  Timer,
+  Calculator,
+  Activity,
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+import { KeepAwake } from '@capacitor-community/keep-awake';
 
 import { useAuth } from './hooks/useAuth';
 import { useProgramData } from './hooks/useProgramData';
@@ -102,6 +122,59 @@ function ClientListView({
 
 // ─── Landing / Login ─────────────────────────────────────────────────────────
 
+const COACH_FEATURES = [
+  {
+    icon: ClipboardList,
+    label: 'Program Editor',
+    body: 'Construct periodized blocks with weeks, days, and exercises. Add custom plan/actual columns that propagate across the entire mesocycle.',
+  },
+  {
+    icon: Users,
+    label: 'Client Management',
+    body: 'Onboard trainees through invite codes. Multi-tenant isolation enforced server-side — your roster, your data, no leakage.',
+  },
+  {
+    icon: BarChart3,
+    label: 'Performance Analytics',
+    body: 'Track 1RM trajectories, weekly volume, and progressive overload. See who pushed and who plateaued at a glance.',
+  },
+  {
+    icon: Layers,
+    label: 'Custom Columns',
+    body: 'Define your own metrics — tempo, RIR, bar position. Plan/actual pairing is built-in. No rigid templates to fight against.',
+  },
+] as const;
+
+const TRAINEE_FEATURES = [
+  {
+    icon: Dumbbell,
+    label: 'Workout Logger',
+    body: 'Grid interface. Log load and RPE in seconds. Prescribed targets sit alongside what you actually hit.',
+  },
+  {
+    icon: TrendingUp,
+    label: 'Progress Tracking',
+    body: 'Compare every set against last week, last month, or program start. No more guessing if you are trending up.',
+  },
+  {
+    icon: Timer,
+    label: 'Rest Timer',
+    body: 'Auto-starts between sets, audible cues, persistent across screens. The timer does not care if you switch tabs.',
+  },
+  {
+    icon: Calculator,
+    label: 'Plate Calculator',
+    body: 'Tap a target weight, get exact plate breakdowns for standard bars. Saves the math when your hands are chalked.',
+  },
+] as const;
+
+const SAMPLE_LOG_ROWS = [
+  { name: 'Back Squat',     sets: '4×5',    plan: '160 @7',  actual: '162 @8' },
+  { name: 'Romanian DL',    sets: '3×8',    plan: '120 @8',  actual: '122 @8' },
+  { name: 'Walking Lunge',  sets: '3×10',   plan: '24 @7',   actual: '24 @7'  },
+  { name: 'Hanging L-sit',  sets: '4×0:20', plan: 'BW @8',   actual: 'BW @9'  },
+] as const;
+
 function LandingPage({
   onLogin,
   onSignup,
@@ -122,6 +195,13 @@ function LandingPage({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [formatError, setFormatError] = useState('');
+  const [showLogin, setShowLogin] = useState(false);
+
+  const openLogin = () => setShowLogin(true);
+  const closeLogin = () => {
+    setShowLogin(false);
+    setFormatError('');
+  };
 
   const handleSubmit = () => {
     if (!isValidEmail(email)) {
@@ -134,103 +214,369 @@ function LandingPage({
 
   return (
     <div className="min-h-screen flex flex-col">
-      <nav className="flex justify-between items-center p-6 border-b border-border">
+      {/* ── Nav ────────────────────────────────────────────────────────── */}
+      <nav className="flex justify-between items-center px-6 py-4 border-b border-border sticky top-0 bg-background/90 backdrop-blur-md z-40">
         <div className="flex items-center space-x-3">
           <div className="w-8 h-8 bg-foreground flex items-center justify-center">
             <Dumbbell className="w-5 h-5 text-background" />
           </div>
           <span className="text-lg font-bold uppercase tracking-widest font-mono">IronTrack</span>
         </div>
-        <button onClick={onToggleTheme} className="p-2 hover:bg-muted rounded-sm transition-colors">
-          {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-        </button>
+        <div className="flex items-center space-x-2">
+          <motion.button
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={openLogin}
+            data-testid="open-login-btn"
+            className="flex items-center space-x-2 px-4 py-2 bg-foreground text-background text-[11px] font-bold font-mono uppercase tracking-widest hover:opacity-90 transition-opacity"
+          >
+            <LogIn className="w-4 h-4" />
+            <span>Login</span>
+          </motion.button>
+          <button
+            onClick={onToggleTheme}
+            className="p-2 hover:bg-muted rounded-sm transition-colors"
+            aria-label="Toggle theme"
+          >
+            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+        </div>
       </nav>
 
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-md space-y-10">
-          <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}>
-            <h1 className="text-7xl font-bold tracking-tighter uppercase italic font-serif leading-none">
+      {/* ── Hero ───────────────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden border-b border-border">
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none opacity-[0.04] [background-image:linear-gradient(to_right,currentColor_1px,transparent_1px),linear-gradient(to_bottom,currentColor_1px,transparent_1px)] [background-size:48px_48px]"
+        />
+        <div className="relative max-w-[1400px] mx-auto px-6 py-20 md:py-28 grid md:grid-cols-2 gap-12 items-center">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+              <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                System Online / V1
+              </span>
+            </div>
+            <h1 className="text-7xl md:text-8xl font-bold tracking-tighter uppercase italic font-serif leading-[0.85] text-foreground">
               Iron<br />Track
             </h1>
-            <p className="text-muted-foreground font-mono text-xs mt-4 uppercase tracking-widest">
+            <p className="text-muted-foreground font-mono text-xs mt-6 uppercase tracking-widest">
               Unified Training Management System
             </p>
+            <p className="text-foreground/80 mt-6 max-w-md leading-relaxed">
+              The brutalist toolkit for serious coaches and athletes. Build periodized programs,
+              log every set, and watch progress emerge from the data — no fluff, no fitness theatre.
+            </p>
+            <div className="mt-10 flex flex-wrap gap-3">
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={openLogin}
+                data-testid="hero-login-btn"
+                className="bg-foreground text-background px-7 py-4 text-xs font-bold uppercase tracking-widest flex items-center hover:opacity-90 shadow-lg"
+              >
+                <LogIn className="w-4 h-4 mr-2" />
+                Enter System
+              </motion.button>
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={onSignup}
+                className="bg-background border border-border hover:border-foreground text-foreground px-7 py-4 text-xs font-bold uppercase tracking-widest flex items-center transition-colors"
+              >
+                <UserPlus className="w-4 h-4 mr-2" />
+                Sign Up
+              </motion.button>
+            </div>
           </motion.div>
 
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="hidden md:block"
           >
             <TechnicalCard>
-              <div className="p-8 space-y-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
-                    Email
-                  </label>
-                  <div className="field-wrap">
-                    <TechnicalInput
-                      value={email}
-                      onChange={setEmail}
-                      placeholder="you@example.com"
-                      type="email"
-                      data-testid="login-email"
-                    />
-                  </div>
+              <div className="flex items-center justify-between border-b border-border px-5 py-3 bg-muted/40">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 bg-foreground/40 rounded-full" />
+                  <span className="w-2 h-2 bg-foreground/40 rounded-full" />
+                  <span className="w-2 h-2 bg-foreground/40 rounded-full" />
                 </div>
-
-                <div className="space-y-2">
-                  <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
-                    Password
-                  </label>
-                  <div className="field-wrap">
-                    <TechnicalInput
-                      value={password}
-                      onChange={setPassword}
-                      placeholder="••••••••"
-                      type="password"
-                      data-testid="login-password"
-                    />
-                  </div>
+                <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                  Session_Log // Week 04 / Day 02
+                </span>
+              </div>
+              <div className="p-6 font-mono text-[11px] space-y-3">
+                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-4 text-muted-foreground uppercase tracking-widest text-[9px] border-b border-border pb-2">
+                  <span>Exercise</span>
+                  <span>Sets</span>
+                  <span>Plan</span>
+                  <span>Actual</span>
                 </div>
-
-                {formatError && (
-                  <p className="text-red-500 font-mono text-xs" data-testid="login-format-error">{formatError}</p>
-                )}
-                {loginError && !formatError && (
-                  <p className="text-red-500 font-mono text-xs">{loginError}</p>
-                )}
-
-                <button
-                  onClick={handleSubmit}
-                  disabled={isBootstrapping}
-                  data-testid="login-btn"
-                  className="btn-press w-full bg-foreground text-background py-4 text-xs font-bold uppercase tracking-widest rounded-input hover:opacity-90 shadow-lg disabled:opacity-40 disabled:cursor-wait"
-                >
-                  {isBootstrapping ? 'Initialising...' : 'Enter System'}
-                </button>
-
-                <div className="flex justify-between">
-                  <button
-                    onClick={onForgot}
-                    data-testid="goto-forgot-btn"
-                    className="text-xs font-mono text-muted-foreground hover:text-foreground uppercase tracking-widest"
-                  >
-                    Forgot Password?
-                  </button>
-                  <button
-                    onClick={onSignup}
-                    data-testid="goto-signup-btn"
-                    className="text-xs font-mono text-muted-foreground hover:text-foreground uppercase tracking-widest"
-                  >
-                    Sign Up
-                  </button>
+                {SAMPLE_LOG_ROWS.map((row, i) => (
+                  <div key={row.name} className="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center">
+                    <span className="text-foreground">{row.name}</span>
+                    <span className="text-muted-foreground">{row.sets}</span>
+                    <span className="text-muted-foreground">{row.plan}</span>
+                    <span className={i < 2 ? 'text-green-500 font-bold' : 'text-foreground'}>
+                      {row.actual}
+                    </span>
+                  </div>
+                ))}
+                <div className="pt-3 border-t border-border flex justify-between text-[9px] uppercase tracking-widest text-muted-foreground">
+                  <span>RPE_AVG = 7.8</span>
+                  <span>VOLUME = 14,420 KG</span>
                 </div>
               </div>
             </TechnicalCard>
           </motion.div>
         </div>
-      </div>
+      </section>
+
+      {/* ── For Coaches ────────────────────────────────────────────────── */}
+      <section className="border-b border-border">
+        <div className="max-w-[1400px] mx-auto px-6 py-20">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-80px' }}
+            className="flex items-end justify-between mb-12"
+          >
+            <div>
+              <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">// 01</span>
+              <h2 className="text-5xl md:text-6xl font-bold tracking-tighter uppercase italic font-serif text-foreground mt-2">
+                For Coaches
+              </h2>
+              <p className="text-muted-foreground font-mono text-xs mt-3 uppercase tracking-widest">
+                Operations Console
+              </p>
+            </div>
+            <ShieldCheck className="hidden md:block w-12 h-12 text-foreground/30" />
+          </motion.div>
+
+          <div className="grid md:grid-cols-2 gap-5">
+            {COACH_FEATURES.map((f, i) => (
+              <motion.div
+                key={f.label}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.05, duration: 0.3 }}
+              >
+                <TechnicalCard className="h-full hover:border-muted-foreground hover:-translate-y-1 transition-all">
+                  <div className="p-7">
+                    <div className="flex items-center justify-between mb-5">
+                      <div className="w-12 h-12 bg-muted flex items-center justify-center">
+                        <f.icon className="w-6 h-6" />
+                      </div>
+                      <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                        /0{i + 1}
+                      </span>
+                    </div>
+                    <h3 className="text-xl font-bold tracking-tight text-foreground mb-2">{f.label}</h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{f.body}</p>
+                  </div>
+                </TechnicalCard>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── For Trainees ───────────────────────────────────────────────── */}
+      <section className="border-b border-border bg-muted/30">
+        <div className="max-w-[1400px] mx-auto px-6 py-20">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-80px' }}
+            className="flex items-end justify-between mb-12"
+          >
+            <div>
+              <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">// 02</span>
+              <h2 className="text-5xl md:text-6xl font-bold tracking-tighter uppercase italic font-serif text-foreground mt-2">
+                For Trainees
+              </h2>
+              <p className="text-muted-foreground font-mono text-xs mt-3 uppercase tracking-widest">
+                Athlete Protocol
+              </p>
+            </div>
+            <Activity className="hidden md:block w-12 h-12 text-foreground/30" />
+          </motion.div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {TRAINEE_FEATURES.map((f, i) => (
+              <motion.div
+                key={f.label}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.05, duration: 0.3 }}
+              >
+                <TechnicalCard className="h-full hover:border-muted-foreground hover:-translate-y-1 transition-all">
+                  <div className="p-6">
+                    <div className="w-10 h-10 bg-foreground text-background flex items-center justify-center mb-5">
+                      <f.icon className="w-5 h-5" />
+                    </div>
+                    <h3 className="text-lg font-bold tracking-tight text-foreground mb-2">{f.label}</h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{f.body}</p>
+                  </div>
+                </TechnicalCard>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Philosophy ─────────────────────────────────────────────────── */}
+      <section className="border-b border-border">
+        <div className="max-w-[1400px] mx-auto px-6 py-20 grid md:grid-cols-2 gap-12 items-center">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.4 }}
+          >
+            <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">// 03</span>
+            <h2 className="text-5xl md:text-6xl font-bold tracking-tighter uppercase italic font-serif text-foreground mt-2 leading-[0.9]">
+              Brutalist<br />by Design
+            </h2>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.4 }}
+            className="space-y-5 text-foreground/80 leading-relaxed"
+          >
+            <p>
+              Most fitness apps wrap your training in cartoon graphics, dopamine streaks, and gamified noise. IronTrack does not.
+            </p>
+            <p>
+              Every interface element is structural — monospaced labels, sharp grid lines, plain numerical truth. The aesthetic is technical for a reason: when your hands are sweaty and you have ninety seconds before the next set, you do not need a celebration animation. You need to read your numbers.
+            </p>
+            <div className="grid grid-cols-3 pt-4 border-t border-border">
+              {[
+                { k: 'Density',   v: 'High' },
+                { k: 'Latency',   v: 'Sub-100ms' },
+                { k: 'Animation', v: 'Functional' },
+              ].map((m) => (
+                <div key={m.k} className="px-3 py-2 border-r last:border-r-0 border-border">
+                  <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">{m.k}</p>
+                  <p className="text-sm font-mono text-foreground mt-1">{m.v}</p>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ── Final CTA ──────────────────────────────────────────────────── */}
+      <section className="border-b border-border">
+        <div className="max-w-[1400px] mx-auto px-6 py-20 text-center">
+          <motion.h2
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.4 }}
+            className="text-5xl md:text-7xl font-bold tracking-tighter uppercase italic font-serif text-foreground"
+          >
+            Ready to train?
+          </motion.h2>
+          <p className="text-muted-foreground font-mono text-xs mt-4 uppercase tracking-widest">
+            Authentication required to enter the system
+          </p>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={openLogin}
+            className="mt-10 bg-foreground text-background px-10 py-5 text-xs font-bold uppercase tracking-widest inline-flex items-center hover:opacity-90 shadow-lg"
+          >
+            <LogIn className="w-4 h-4 mr-2" />
+            Login
+            <ChevronRight className="w-4 h-4 ml-2" />
+          </motion.button>
+        </div>
+      </section>
+
+      {/* ── Footer ─────────────────────────────────────────────────────── */}
+      <footer className="px-6 py-6 flex flex-col md:flex-row justify-between items-center gap-2 text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+        <span>IronTrack © 2026 — All rights reserved</span>
+        <span>Build: Stable / Tenant-Isolated / RLS-Enforced</span>
+      </footer>
+
+      {/* ── Login Modal ────────────────────────────────────────────────── */}
+      <Modal isOpen={showLogin} onClose={closeLogin} title="Enter System">
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+              Email
+            </label>
+            <div className="field-wrap">
+              <TechnicalInput
+                value={email}
+                onChange={setEmail}
+                placeholder="you@example.com"
+                type="email"
+                data-testid="login-email"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+              Password
+            </label>
+            <div className="field-wrap">
+              <TechnicalInput
+                value={password}
+                onChange={setPassword}
+                placeholder="••••••••"
+                type="password"
+                data-testid="login-password"
+              />
+            </div>
+          </div>
+
+          {formatError && (
+            <p className="text-red-500 font-mono text-xs" data-testid="login-format-error">{formatError}</p>
+          )}
+          {loginError && !formatError && (
+            <p className="text-red-500 font-mono text-xs">{loginError}</p>
+          )}
+
+          <button
+            onClick={handleSubmit}
+            disabled={isBootstrapping}
+            data-testid="login-btn"
+            className="btn-press w-full bg-foreground text-background py-4 text-xs font-bold uppercase tracking-widest rounded-input hover:opacity-90 shadow-lg disabled:opacity-40 disabled:cursor-wait"
+          >
+            {isBootstrapping ? 'Initialising...' : 'Enter System'}
+          </button>
+
+          <div className="flex justify-between">
+            <button
+              onClick={() => { closeLogin(); onForgot(); }}
+              data-testid="goto-forgot-btn"
+              className="text-xs font-mono text-muted-foreground hover:text-foreground uppercase tracking-widest"
+            >
+              Forgot Password?
+            </button>
+            <button
+              onClick={() => { closeLogin(); onSignup(); }}
+              data-testid="goto-signup-btn"
+              className="text-xs font-mono text-muted-foreground hover:text-foreground uppercase tracking-widest"
+            >
+              Sign Up
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -502,14 +848,48 @@ export default function App() {
     // vice versa). Lazy-import keeps the web build from pulling in the
     // plugin unnecessarily.
     if (isNative()) {
+      // Match the actual --color-background CSS variables: zinc-950 for dark,
+      // zinc-50 for light. Off-by-one hex codes here produce a one-pixel
+      // colour seam between the system bar and the app surface.
       void import('@capacitor/status-bar').then(({ StatusBar, Style }) => {
         void StatusBar.setStyle({ style: theme === 'dark' ? Style.Dark : Style.Light }).catch(() => {});
         void StatusBar.setBackgroundColor({
-          color: theme === 'dark' ? '#09090b' : '#ffffff',
+          color: theme === 'dark' ? '#09090b' : '#fafafa',
         }).catch(() => {});
       }).catch(() => {});
     }
   }, [theme]);
+
+  // Auto keep-awake while a workout is in progress. Released when the workout
+  // is finished (activeWorkout flips to null), the user navigates away, or
+  // App unmounts — the cleanup runs in all three cases.
+  //
+  // Native-only: the manual "Gym Mode" toggle in ClientDashboard handles the
+  // web-side wakeLock through useWakeLock; this effect intentionally avoids
+  // contending with that hook on web.
+  useEffect(() => {
+    if (!activeWorkout || !isNative()) return;
+    void KeepAwake.keepAwake().catch(() => {});
+    return () => {
+      void KeepAwake.allowSleep().catch(() => {});
+    };
+  }, [activeWorkout]);
+
+  // Hold the native splash screen until the auth session AND the program
+  // data are both hydrated. Without this, the splash auto-hides at ~800ms
+  // and reveals an empty white frame for the duration of the Supabase round
+  // trip. Paired with `launchAutoHide: false` in capacitor.config.ts.
+  //
+  // SplashScreen.hide() is idempotent, so the effect re-firing once both
+  // flags settle is safe; we still gate on isNative() so the web build
+  // never resolves the optional package.
+  useEffect(() => {
+    if (!isNative()) return;
+    if (isAuthLoading || isLoadingData) return;
+    void import('@capacitor/splash-screen').then(({ SplashScreen }) => {
+      void SplashScreen.hide().catch(() => {});
+    }).catch(() => {});
+  }, [isAuthLoading, isLoadingData]);
 
   // Magic-link routing now happens synchronously inside useAuth's state
   // initializer — no effect needed here.

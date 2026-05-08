@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { TechnicalCard } from '../ui';
 import { cn } from '../../lib/utils';
 import { useWakeLock } from '../../hooks/useWakeLock';
+import { hapticNav } from '../../lib/haptics';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
 import type { Client, Program, WorkoutWeek, WorkoutDay } from '../../types';
 
@@ -279,7 +280,7 @@ function CurrentBlockView({
             return (
               <button
                 key={w.id}
-                onClick={() => onSelectWeek(w.id)}
+                onClick={() => { hapticNav(); onSelectWeek(w.id); }}
                 data-testid={`week-tab-${w.weekNumber}`}
                 aria-pressed={active}
                 className={cn(
@@ -340,7 +341,7 @@ function CurrentBlockView({
                 <button
                   key={day.id}
                   type="button"
-                  onClick={() => onStartWorkout(selectedWeek, day)}
+                  onClick={() => { hapticNav(); onStartWorkout(selectedWeek, day); }}
                   data-testid={`log-session-btn-day-${day.dayNumber}`}
                   className={cn(
                     'group relative text-left overflow-hidden rounded-2xl border transition-all',

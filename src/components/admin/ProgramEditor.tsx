@@ -449,6 +449,13 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
                                       className="text-center overflow-hidden text-ellipsis whitespace-nowrap"
                                       placeholder="..."
                                     />
+                                  ) : cellValue ? (
+                                    <div
+                                      title={cellValue}
+                                      className="text-xs font-mono italic text-blue-400/80 text-center overflow-hidden text-ellipsis whitespace-nowrap select-text"
+                                    >
+                                      {cellValue}
+                                    </div>
                                   ) : (
                                     <div className="text-[10px] font-mono text-muted-foreground/30 italic">
                                       Trainee Input

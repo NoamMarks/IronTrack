@@ -21,7 +21,7 @@ import { TechnicalCard } from '../ui';
 import { cn } from '../../lib/utils';
 import { DEFAULT_COLUMNS } from '../../constants/mockData';
 import { PlateCalculator } from './PlateCalculator';
-import { hapticTick, hapticSuccess } from '../../lib/haptics';
+import { hapticTick, hapticHeavy } from '../../lib/haptics';
 import { sanitizeOnType, clampOnCommit, parseNumeric } from '../../lib/numericInput';
 import {
   findPreviousWeekExercise,
@@ -323,7 +323,7 @@ export function WorkoutGridLogger({
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    hapticSuccess();
+    hapticHeavy();
     setSaveStatus('saving');
     try {
       await onFinish({ ...dayRef.current, exercises: exercisesRef.current });
