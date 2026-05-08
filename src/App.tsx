@@ -17,6 +17,8 @@ import {
   Timer,
   Calculator,
   Activity,
+  Gauge,
+  Trophy,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -33,6 +35,9 @@ import { SuperadminView } from './components/admin/SuperadminView';
 import { ClientDashboard } from './components/trainee/ClientDashboard';
 import { WorkoutGridLogger } from './components/trainee/WorkoutGridLogger';
 import { RestTimer } from './components/trainee/RestTimer';
+import { PlateCalculator } from './components/trainee/PlateCalculator';
+import { RPECalculator } from './components/calculators/RPECalculator';
+import { PointsCalculator } from './components/calculators/PointsCalculator';
 import { SignupPage } from './components/auth/SignupPage';
 import { ForgotPasswordPage } from './components/auth/ForgotPasswordPage';
 import { checkPasswordStrength } from './lib/crypto';
@@ -433,6 +438,104 @@ function LandingPage({
         </div>
       </section>
 
+      {/* ── Technical Playground ───────────────────────────────────────── */}
+      <section className="border-b border-border">
+        <div className="max-w-[1400px] mx-auto px-6 py-20">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-80px' }}
+            className="flex items-end justify-between mb-12"
+          >
+            <div>
+              <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">// 03</span>
+              <h2 className="text-5xl md:text-6xl font-bold tracking-tighter uppercase italic font-serif text-foreground mt-2 leading-[0.95]">
+                The Technical<br />Playground
+              </h2>
+              <p className="text-muted-foreground font-mono text-xs mt-3 uppercase tracking-widest">
+                Try the on-platform tools — no account required
+              </p>
+            </div>
+            <Calculator className="hidden md:block w-12 h-12 text-foreground/30" />
+          </motion.div>
+
+          <div className="grid lg:grid-cols-3 gap-5">
+            {[
+              { label: 'Plate Calculator', icon: Calculator, body: <PlateCalculator isInline /> },
+              { label: 'RPE → 1RM',        icon: Gauge,      body: <RPECalculator />            },
+              { label: 'DOTS Score',       icon: Trophy,     body: <PointsCalculator />         },
+            ].map((tool, i) => (
+              <motion.div
+                key={tool.label}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.06, duration: 0.3 }}
+              >
+                <TechnicalCard className="h-full">
+                  <div className="border-b border-border bg-muted/30 px-5 py-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <tool.icon className="w-4 h-4" />
+                      <span className="text-[10px] font-mono uppercase tracking-widest text-foreground">
+                        {tool.label}
+                      </span>
+                    </div>
+                    <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">
+                      /0{i + 1}
+                    </span>
+                  </div>
+                  <div className="p-5">{tool.body}</div>
+                </TechnicalCard>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Conversion CTA — placed directly under the tools so the user
+              hits it the moment they finish playing with one. */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.3 }}
+            className="mt-8"
+          >
+            <TechnicalCard>
+              <div className="px-6 py-5 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="text-center md:text-left">
+                  <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                    Numbers are temporary in this view
+                  </p>
+                  <p className="text-base md:text-lg font-bold italic font-serif text-foreground mt-0.5">
+                    Log in to keep them.
+                  </p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={openLogin}
+                    data-testid="playground-login-btn"
+                    className="bg-foreground text-background px-6 py-3 text-xs font-bold uppercase tracking-widest flex items-center hover:opacity-90 shadow-lg"
+                  >
+                    <LogIn className="w-4 h-4 mr-2" />
+                    Login
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={onSignup}
+                    className="bg-background border border-border hover:border-foreground text-foreground px-6 py-3 text-xs font-bold uppercase tracking-widest flex items-center transition-colors"
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Sign Up
+                  </motion.button>
+                </div>
+              </div>
+            </TechnicalCard>
+          </motion.div>
+        </div>
+      </section>
+
       {/* ── Philosophy ─────────────────────────────────────────────────── */}
       <section className="border-b border-border">
         <div className="max-w-[1400px] mx-auto px-6 py-20 grid md:grid-cols-2 gap-12 items-center">
@@ -442,7 +545,7 @@ function LandingPage({
             viewport={{ once: true }}
             transition={{ duration: 0.4 }}
           >
-            <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">// 03</span>
+            <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">// 04</span>
             <h2 className="text-5xl md:text-6xl font-bold tracking-tighter uppercase italic font-serif text-foreground mt-2 leading-[0.9]">
               Brutalist<br />by Design
             </h2>

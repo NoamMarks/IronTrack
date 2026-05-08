@@ -11,8 +11,12 @@ import {
 } from '../../lib/numericInput';
 
 interface PlateCalculatorProps {
-  isOpen: boolean;
-  onClose: () => void;
+  /** Render without the Modal chrome — for embedding in a page (e.g. the
+   *  landing-page Technical Playground). When true, isOpen/onClose are
+   *  ignored and the component shows its content unconditionally. */
+  isInline?: boolean;
+  isOpen?: boolean;
+  onClose?: () => void;
   initialWeight?: string;
   /** If provided, renders an "Apply Weight" button that emits the current target. */
   onApply?: (weight: string) => void;
@@ -23,16 +27,24 @@ function blockInvalidNumberKeys(e: React.KeyboardEvent<HTMLInputElement>) {
   if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault();
 }
 
-export function PlateCalculator({ isOpen, onClose, initialWeight = '', onApply }: PlateCalculatorProps) {
+export function PlateCalculator({
+  isInline = false,
+  isOpen = false,
+  onClose,
+  initialWeight = '',
+  onApply,
+}: PlateCalculatorProps) {
   const [targetInput, setTargetInput] = useState(initialWeight);
   const [barWeight, setBarWeight] = useState('20');
   const [collarWeight, setCollarWeight] = useState('2.5');
 
   // Re-sync target whenever the modal (re)opens with a new initialWeight —
   // e.g. opening the calculator for a different set in WorkoutGridLogger.
+  // In inline mode there is no open/close cycle, so we sync any time
+  // initialWeight changes externally.
   useEffect(() => {
-    if (isOpen) setTargetInput(initialWeight);
-  }, [isOpen, initialWeight]);
+    if (isInline || isOpen) setTargetInput(initialWeight);
+  }, [isInline, isOpen, initialWeight]);
 
   // Each field clamps independently — see RANGES in lib/numericInput.ts.
   // Defaults match competition standard equipment so a fresh modal renders
@@ -45,9 +57,8 @@ export function PlateCalculator({ isOpen, onClose, initialWeight = '', onApply }
 
   const result = calculatePlates(target, bar, collar);
 
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Plate Calculator">
-      <div className="space-y-6">
+  const body = (
+    <div className="space-y-6">
         {/* Inputs — each one bound to a NumericFieldKind so they share the
             same overflow / decimals / clamp rules as the rest of the app. */}
         <div className="grid grid-cols-3 gap-3">
@@ -177,6 +188,13 @@ export function PlateCalculator({ isOpen, onClose, initialWeight = '', onApply }
           </button>
         )}
       </div>
+  );
+
+  if (isInline) return body;
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose ?? (() => {})} title="Plate Calculator">
+      {body}
     </Modal>
   );
 }
