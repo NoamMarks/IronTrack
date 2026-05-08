@@ -89,17 +89,16 @@ function buildEmailHtml(code: string, purpose: 'signup' | 'reset'): string {
 // ─── POST to /api/send-email ────────────────────────────────────────────────
 
 /**
- * Console-only mode. While Resend is still in test mode (sender domain not
- * verified at resend.com/domains), the /api/send-email function 502s for
- * any recipient other than the account owner's address, which spams the
- * browser console with a confusing error. Set to `false` once a real domain
- * is verified and the `from:` in api/send-email.ts is updated — that's the
- * only switch needed to flip back to live email delivery.
- *
- * The OTP is still logged to the browser console via logOtpFallback below,
- * so the signup / password-reset flows are fully usable in this mode.
+ * Live-delivery kill-switch. Flip back to `true` to skip the network call
+ * entirely and rely on the logOtpFallback console output — useful when
+ * Resend domain verification lapses, the API key is rotated/missing, or a
+ * developer is running locally without `vercel dev`. Independent of this
+ * flag, the API-failure path in sendVerificationEmailViaResend /
+ * sendPasswordResetEmailViaResend already falls back to a console log when
+ * /api/send-email returns non-OK, so a missing `RESEND_API_KEY` (which
+ * yields a 500) keeps the signup / reset flows usable.
  */
-const EMAIL_CONSOLE_ONLY = true;
+const EMAIL_CONSOLE_ONLY = false;
 
 async function sendViaApi(to: string, subject: string, html: string): Promise<boolean> {
   if (EMAIL_CONSOLE_ONLY) {

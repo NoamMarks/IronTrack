@@ -276,7 +276,7 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
                 <div className="p-8 space-y-6">
                   <p className="text-xs font-mono text-muted-foreground">
                     A 6-digit verification code has been sent to <span className="text-foreground font-bold">{email}</span>.
-                    Check the browser console for the code.
+                    If you don't see the email, check your spam folder.
                   </p>
 
                   <div className="space-y-1.5">
