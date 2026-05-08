@@ -36,6 +36,7 @@ import { ClientDashboard } from './components/trainee/ClientDashboard';
 import { WorkoutGridLogger } from './components/trainee/WorkoutGridLogger';
 import { RestTimer } from './components/trainee/RestTimer';
 import { PlateCalculator } from './components/trainee/PlateCalculator';
+import { PostWorkoutReflectionModal } from './components/trainee/PostWorkoutReflectionModal';
 import { RPECalculator } from './components/calculators/RPECalculator';
 import { PointsCalculator } from './components/calculators/PointsCalculator';
 import { SignupPage } from './components/auth/SignupPage';
@@ -909,6 +910,7 @@ export default function App() {
     archiveProgram,
     deleteClient,
     createProgram,
+    createProgramFromTemplate,
     appendClient,
     getClientsForTenant,
   } = useProgramData(authenticatedUser);
@@ -916,6 +918,13 @@ export default function App() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [activeWorkout, setActiveWorkout] = useState<{ week: WorkoutWeek; day: WorkoutDay } | null>(null);
   const [isAddClientOpen, setIsAddClientOpen] = useState(false);
+  // Set immediately after a successful Finish Workout. While non-null, the
+  // PostWorkoutReflectionModal is shown over the dashboard; clearing it
+  // (skip or submit) returns the trainee to a clean dashboard.
+  const [pendingReflection, setPendingReflection] = useState<
+    | { clientId: string; programId: string; weekId: string; day: WorkoutDay }
+    | null
+  >(null);
   // Lazy initializer reads the saved preference SYNCHRONOUSLY before the
   // theme-persist effect runs. The previous "set default 'dark', then a
   // useEffect reads localStorage on mount" pattern was racy: the persist
@@ -1162,9 +1171,10 @@ export default function App() {
     );
   };
 
-  /** Explicit "Finish Workout" — stamps day.logged_at, exits back to the
-   *  client dashboard, and surfaces the success toast. The trainee can
-   *  put the phone down mid-workout without triggering this. */
+  /** Explicit "Finish Workout" — stamps day.logged_at, exits the logger,
+   *  and queues the post-workout reflection modal. The toast is deferred
+   *  until the trainee skips or submits the reflection so the two pieces
+   *  of feedback don't compete for attention. */
   const handleFinishSession = async (updatedDay: WorkoutDay): Promise<void> => {
     if (!selectedClient || !activeWorkout) return;
     const program =
@@ -1178,7 +1188,40 @@ export default function App() {
       updatedDay,
       { markComplete: true },
     );
+    // Hold a snapshot of the just-finished session so the reflection modal
+    // can persist its difficulty/note onto the right `days` row even after
+    // activeWorkout is cleared.
+    setPendingReflection({
+      clientId: selectedClient.id,
+      programId: program.id,
+      weekId: activeWorkout.week.id,
+      day: { ...updatedDay, loggedAt: new Date().toISOString() },
+    });
     setActiveWorkout(null);
+  };
+
+  const handleReflectionSubmit = async (difficulty: number, note: string): Promise<void> => {
+    const ctx = pendingReflection;
+    if (!ctx) return;
+    try {
+      await saveSession(
+        ctx.clientId,
+        ctx.programId,
+        ctx.weekId,
+        ctx.day,
+        { markComplete: false, reflection: { difficulty, note } },
+      );
+      setToast('Workout finished — reflection captured.');
+    } catch (err) {
+      console.error('[IronTrack] reflection save failed', err);
+      setToast('Could not save reflection — try again from the dashboard.');
+    } finally {
+      setPendingReflection(null);
+    }
+  };
+
+  const handleReflectionSkip = () => {
+    setPendingReflection(null);
     setToast('Workout finished — well done!');
   };
 
@@ -1385,6 +1428,7 @@ export default function App() {
           isLoadingData={isLoadingData}
           onSaveProgram={saveProgram}
           onCreateProgram={createProgram}
+          onCreateProgramFromTemplate={createProgramFromTemplate}
           onDeleteClient={deleteClient}
           onArchiveProgram={archiveProgram}
           onBack={() => {
@@ -1403,36 +1447,44 @@ export default function App() {
 
   if (selectedClient && (view === 'trainee' || view === 'coach')) {
     return (
-      <AppShell
-        authenticatedUser={authenticatedUser}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        onLogout={logout}
-        toast={toast}
-        onDismissToast={dismissToast}
-        onGoAdmin={() => setView('admin')}
-        impersonating={impersonating}
-        onStopImpersonating={stopImpersonating}
-      >
-        <ClientDashboard
-          client={selectedClient}
-          // Coaches drilling into a client (or superadmins impersonating a
-          // coach drilled into a client) get a back arrow that returns to
-          // the client list. Trainees viewing their OWN dashboard get
-          // `undefined` — there's no parent view to go back to, and the
-          // arrow used to call logout() which trainees confused for a
-          // navigation gesture. Logout lives in the X icon up top.
-          onBack={
-            authenticatedUser.role === 'admin' || impersonating
-              ? () => {
-                  setSelectedClient(null);
-                  setView('coach');
-                }
-              : undefined
-          }
-          onStartWorkout={(week, day) => setActiveWorkout({ week, day })}
+      <>
+        <AppShell
+          authenticatedUser={authenticatedUser}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onLogout={logout}
+          toast={toast}
+          onDismissToast={dismissToast}
+          onGoAdmin={() => setView('admin')}
+          impersonating={impersonating}
+          onStopImpersonating={stopImpersonating}
+        >
+          <ClientDashboard
+            client={selectedClient}
+            // Coaches drilling into a client (or superadmins impersonating a
+            // coach drilled into a client) get a back arrow that returns to
+            // the client list. Trainees viewing their OWN dashboard get
+            // `undefined` — there's no parent view to go back to, and the
+            // arrow used to call logout() which trainees confused for a
+            // navigation gesture. Logout lives in the X icon up top.
+            onBack={
+              authenticatedUser.role === 'admin' || impersonating
+                ? () => {
+                    setSelectedClient(null);
+                    setView('coach');
+                  }
+                : undefined
+            }
+            onStartWorkout={(week, day) => setActiveWorkout({ week, day })}
+          />
+        </AppShell>
+        <PostWorkoutReflectionModal
+          isOpen={pendingReflection !== null}
+          dayName={pendingReflection?.day.name}
+          onSubmit={handleReflectionSubmit}
+          onSkip={handleReflectionSkip}
         />
-      </AppShell>
+      </>
     );
   }
 

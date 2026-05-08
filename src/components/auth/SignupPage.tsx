@@ -142,11 +142,17 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
         return;
       }
 
-      // TODO(supabase-otp-migration): /api/signup-user calls
-      // admin.createUser, which now collides with the user Supabase OTP just
-      // created and will throw "User already registered". Until that endpoint
-      // is made idempotent (or retired in favor of a profile-only upsert),
-      // this onComplete call will fail end-to-end. See migration notes.
+      // Persist the password from the form onto the now-authenticated user.
+      // signInWithOtp creates auth users without a password, so without
+      // this step the trainee could only ever sign in via OTP and the
+      // password field on this form would be silently discarded.
+      const { error: pwErr } = await supabase.auth.updateUser({ password });
+      if (pwErr) {
+        console.error('[IronTrack signup] updateUser({ password }) failed', pwErr);
+        setOtpError(`Could not set your password: ${pwErr.message}`);
+        return;
+      }
+
       await onComplete(
         name.trim(),
         email.trim(),

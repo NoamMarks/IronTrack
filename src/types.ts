@@ -26,6 +26,13 @@ export interface WorkoutDay {
   exercises: ExercisePlan[];
   /** ISO timestamp of the last save — used by analytics to order sessions chronologically */
   loggedAt?: string;
+  /** Post-workout difficulty rating (1 = trivial, 5 = brutal). Set when the
+   *  trainee submits the reflection modal after Finish Workout. */
+  difficulty?: number;
+  /** Free-text note captured alongside the difficulty rating. */
+  reflectionNote?: string;
+  /** ISO timestamp the reflection was submitted. */
+  reflectionAt?: string;
 }
 
 export interface WorkoutWeek {

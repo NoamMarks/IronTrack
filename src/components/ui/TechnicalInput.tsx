@@ -6,6 +6,8 @@ interface TechnicalInputProps {
   /** Final-value commit hook. Numeric cells use this to clamp [min, max] on
    *  blur — see `clampOnCommit` in lib/numericInput.ts. */
   onBlur?: (val: string) => void;
+  onFocus?: () => void;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   placeholder?: string;
   className?: string;
   type?: string;
@@ -30,6 +32,8 @@ export function TechnicalInput({
   value,
   onChange,
   onBlur,
+  onFocus,
+  onKeyDown,
   placeholder,
   className,
   type = 'text',
@@ -49,6 +53,8 @@ export function TechnicalInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onBlur={onBlur ? (e) => onBlur(e.target.value) : undefined}
+      onFocus={onFocus}
+      onKeyDown={onKeyDown}
       placeholder={placeholder}
       readOnly={readOnly}
       maxLength={maxLength}

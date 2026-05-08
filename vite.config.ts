@@ -23,6 +23,9 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,ico,png,woff,woff2}'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // Pull in custom push / notificationclick handlers — see
+        // public/push-handler.js. importScripts runs at SW install time.
+        importScripts: ['/push-handler.js'],
       },
       includeAssets: ['favicon.svg', 'icons/apple-touch-icon.png'],
       manifest: {

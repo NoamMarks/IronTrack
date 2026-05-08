@@ -1,27 +1,38 @@
 /**
  * Vercel Serverless Function: POST /api/signup-user
  *
- * Self-service trainee signup. The browser cannot pass `email_confirm: true`
- * to supabase.auth.admin.createUser (that requires the service-role key), so
- * regular supabase.auth.signUp() always leaves the account in an unconfirmed
- * state when the project has Email Confirmation enabled. This endpoint
- * shortcuts the confirmation step so the user can log in immediately after
- * entering their OTP, while keeping the service-role key off the client.
+ * Self-service trainee signup, idempotent post-OTP.
+ *
+ * Flow background:
+ *   The browser kicks off signup via supabase.auth.signInWithOtp({ email,
+ *   options: { shouldCreateUser: true } }), which creates the auth user
+ *   right away (passwordless) and emails a 6-digit OTP. After the trainee
+ *   types the code, supabase.auth.verifyOtp confirms the email and signs
+ *   them in, then the browser sets the password via
+ *   supabase.auth.updateUser({ password }).
+ *
+ *   By the time this endpoint is hit the user already exists in auth.users.
+ *   Our job is to (a) re-verify the invite server-side so a malicious
+ *   client can't bypass the gate, (b) write the trainee's role + tenant
+ *   onto user_metadata, and (c) ensure the matching profiles row carries
+ *   the same name / role / tenant_id. We keep a "create new user" fallback
+ *   for callers that hit this endpoint outside the OTP flow (legacy
+ *   tooling, future server-side scripts).
  *
  * Server-side invite verification:
- *   The caller passes BOTH `tenantId` and `inviteCode`. Before creating any
- *   auth user, this function looks up the invite_codes row by code and
- *   asserts that (a) it exists, (b) its tenant_id matches the requested
- *   tenantId, and (c) it is not exhausted. Without this gate, any
- *   unauthenticated client could mint trainees in arbitrary tenants by
- *   guessing tenant uuids — an authentication-free privilege escalation.
+ *   The caller passes BOTH `tenantId` and `inviteCode`. Before touching
+ *   auth.users we look up invite_codes by code and assert (a) it exists,
+ *   (b) tenant_id matches the requested tenantId, (c) it is not exhausted.
+ *   Without this gate any unauthenticated client could mint trainees in
+ *   arbitrary tenants by guessing tenant uuids — an authentication-free
+ *   privilege escalation.
  *
  * Required Vercel env vars (server-only — no VITE_ prefix on the secret):
  *   VITE_SUPABASE_URL          Project URL (also used by the browser bundle).
  *   SUPABASE_SERVICE_ROLE_KEY  Service-role key. NEVER expose to the browser.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 
 interface SignupPayload {
   name?: unknown;
@@ -43,6 +54,30 @@ function setCors(res: VercelResponse) {
 
 function normalizeInviteCode(input: string): string {
   return input.replace(/\s+/g, '').toUpperCase();
+}
+
+/**
+ * Find an auth user by their email. Supabase v2 has no `getUserByEmail`,
+ * so we paginate through `admin.listUsers`. Capped at 10 pages × 1000 to
+ * avoid runaway loops on a project with surprising user counts. Once the
+ * project outgrows ~10k users this should be replaced with a direct SQL
+ * query against `auth.users` (still via the service-role client).
+ */
+async function findUserByEmail(
+  supabase: SupabaseClient,
+  email: string,
+): Promise<User | null> {
+  const PER_PAGE = 1000;
+  const MAX_PAGES = 10;
+  const target = email.toLowerCase();
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: PER_PAGE });
+    if (error) throw error;
+    const found = data.users.find((u) => u.email?.toLowerCase() === target);
+    if (found) return found;
+    if (data.users.length < PER_PAGE) return null;
+  }
+  return null;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -88,9 +123,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   // ── Server-side invite verification ────────────────────────────────────
-  // Use the service-role client (RLS bypassed) to look up the invite by
-  // code. Then enforce the tenant match + use cap. Done BEFORE we touch
-  // auth.users so a rejected invite doesn't pollute the auth table.
   const { data: invite, error: inviteErr } = await supabase
     .from('invite_codes')
     .select('id, tenant_id, max_uses, use_count')
@@ -105,9 +137,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Invalid invite code.' });
   }
   if (invite.tenant_id !== tenantId) {
-    // Caller tried to redirect a real invite at a different tenant —
-    // refuse, log loudly enough to investigate but don't leak which side
-    // mismatched (could be either a stale UI or an attacker).
     console.warn('[signup-user] invite tenant mismatch', {
       inviteId: invite.id,
       requestedTenantId: tenantId,
@@ -123,35 +152,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { data, error } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { name, role: 'trainee', tenant_id: tenantId },
-    });
+    // ── Find or create the auth user ────────────────────────────────────
+    let userId: string;
+    const existing = await findUserByEmail(supabase, email);
 
-    if (error || !data?.user) {
-      console.error('[signup-user] createUser failed', error);
-      return res.status(400).json({ error: error?.message ?? 'Failed to create user.' });
+    if (existing) {
+      // Common path: Supabase OTP already created the user. Push the
+      // trainee's role + tenant + name onto user_metadata so any consumer
+      // reading from the JWT (or admin tooling) sees consistent info. The
+      // password was set client-side via supabase.auth.updateUser, so we
+      // deliberately don't touch it here.
+      const { error: updateErr } = await supabase.auth.admin.updateUserById(existing.id, {
+        user_metadata: { name, role: 'trainee', tenant_id: tenantId },
+      });
+      if (updateErr) {
+        console.error('[signup-user] updateUserById failed', updateErr);
+        return res.status(500).json({ error: updateErr.message });
+      }
+      userId = existing.id;
+    } else {
+      // Fallback path: caller hit this endpoint without going through the
+      // browser OTP flow. Recreate the legacy create-with-email_confirm
+      // shortcut so the path remains usable for server-side tooling.
+      const { data, error } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { name, role: 'trainee', tenant_id: tenantId },
+      });
+      if (error || !data?.user) {
+        console.error('[signup-user] createUser failed', error);
+        return res.status(400).json({ error: error?.message ?? 'Failed to create user.' });
+      }
+      userId = data.user.id;
     }
 
-    const userId = data.user.id;
-
-    // The on_auth_user_created trigger has just inserted the profiles row.
-    // Some triggers don't pick up user_metadata reliably, so write the
-    // tenant_id / role / name explicitly. The browser will then sign in
-    // with email+password and onAuthStateChange will hydrate authenticatedUser.
-    const { data: profile, error: updateErr } = await supabase
+    // ── Ensure the profiles row matches ─────────────────────────────────
+    // The on_auth_user_created trigger inserts a row whenever auth.users
+    // gains an entry — both signInWithOtp and admin.createUser fire it —
+    // but we still write tenant_id / role / name explicitly because some
+    // triggers don't reliably copy through user_metadata. Upsert (rather
+    // than update) so a missing row from a stalled trigger heals here.
+    const { data: profile, error: upsertErr } = await supabase
       .from('profiles')
-      .update({ tenant_id: tenantId, name, role: 'trainee' })
-      .eq('id', userId)
+      .upsert(
+        { id: userId, name, email, role: 'trainee', tenant_id: tenantId },
+        { onConflict: 'id' },
+      )
       .select('id, name, email, role, tenant_id, active_program_id')
       .single();
 
-    if (updateErr || !profile) {
-      console.error('[signup-user] profile update failed', updateErr);
+    if (upsertErr || !profile) {
+      console.error('[signup-user] profile upsert failed', upsertErr);
       return res.status(500).json({
-        error: updateErr?.message ?? 'Auth user created but profile update failed.',
+        error: upsertErr?.message ?? 'Auth user ready but profile write failed.',
       });
     }
 

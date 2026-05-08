@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { ArrowLeft, AlertCircle, Smartphone, Archive, Play, CheckCircle2, Circle, ArrowRight } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { ArrowLeft, AlertCircle, Smartphone, Archive, Play, CheckCircle2, Circle, ArrowRight, Bell, BellOff, Video } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TechnicalCard } from '../ui';
 import { cn } from '../../lib/utils';
@@ -60,6 +60,32 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
 
   const wakeLock = useWakeLock();
 
+  // Notification permission — read once on mount, then re-read after every
+  // requestPermission() round-trip. 'unsupported' covers iOS Safari < 16.4
+  // and other browsers without Notification API; we just hide the button.
+  type NotifState = NotificationPermission | 'unsupported';
+  const [notifPermission, setNotifPermission] = useState<NotifState>('unsupported');
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    setNotifPermission(Notification.permission);
+  }, []);
+
+  const requestNotifications = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'default') {
+      // Already granted or denied — repeat calls are no-ops in browsers,
+      // but resync local state in case the user changed it via OS settings.
+      setNotifPermission(Notification.permission);
+      return;
+    }
+    try {
+      const result = await Notification.requestPermission();
+      setNotifPermission(result);
+    } catch (err) {
+      console.warn('[IronTrack] Notification.requestPermission failed', err);
+    }
+  };
+
   return (
     <div className="space-y-10">
       {/* Header */}
@@ -85,22 +111,51 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
             </p>
           </div>
         </div>
-        {/* Gym Mode toggle */}
-        {wakeLock.isSupported && (
-          <button
-            onClick={() => void wakeLock.toggle()}
-            data-testid="gym-mode-toggle"
-            className={cn(
-              'flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-widest border transition-all',
-              wakeLock.isActive
-                ? 'bg-green-600 text-white border-green-600'
-                : 'border-border text-muted-foreground hover:border-muted-foreground'
-            )}
-          >
-            <Smartphone className="w-4 h-4" />
-            {wakeLock.isActive ? 'Gym Mode On' : 'Gym Mode'}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Notifications permission toggle */}
+          {notifPermission !== 'unsupported' && (
+            <button
+              onClick={() => void requestNotifications()}
+              disabled={notifPermission === 'denied'}
+              data-testid="notifications-toggle"
+              title={
+                notifPermission === 'denied'
+                  ? 'Re-enable notifications in your browser settings.'
+                  : undefined
+              }
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-widest border transition-all',
+                notifPermission === 'granted' && 'bg-green-600 text-white border-green-600',
+                notifPermission === 'denied'  && 'border-amber-500/50 text-amber-500 cursor-not-allowed',
+                notifPermission === 'default' && 'border-border text-muted-foreground hover:border-muted-foreground',
+              )}
+            >
+              {notifPermission === 'denied' ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+              {notifPermission === 'granted'
+                ? 'Notifications On'
+                : notifPermission === 'denied'
+                ? 'Notifications Blocked'
+                : 'Enable Notifications'}
+            </button>
+          )}
+
+          {/* Gym Mode toggle */}
+          {wakeLock.isSupported && (
+            <button
+              onClick={() => void wakeLock.toggle()}
+              data-testid="gym-mode-toggle"
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-widest border transition-all',
+                wakeLock.isActive
+                  ? 'bg-green-600 text-white border-green-600'
+                  : 'border-border text-muted-foreground hover:border-muted-foreground'
+              )}
+            >
+              <Smartphone className="w-4 h-4" />
+              {wakeLock.isActive ? 'Gym Mode On' : 'Gym Mode'}
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Tab navigation */}
@@ -395,6 +450,24 @@ function CurrentBlockView({
                           <span className="flex items-center gap-2 min-w-0 text-foreground/80">
                             <Circle className="w-1.5 h-1.5 fill-current shrink-0 opacity-50" />
                             <span className="truncate font-medium">{ex.exerciseName}</span>
+                            {ex.videoUrl && (
+                              // Pre-workout technique reference. The day-card
+                              // wraps this in a <button>, so we stop
+                              // propagation to keep clicking the icon from
+                              // also firing onStartWorkout.
+                              <a
+                                href={ex.videoUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                aria-label={`Watch technique video for ${ex.exerciseName}`}
+                                data-testid={`exercise-video-${ex.id}`}
+                                title="Watch technique video"
+                                className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-sm border border-blue-500/30 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500 hover:text-blue-300 transition-colors"
+                              >
+                                <Video className="w-3 h-3" />
+                              </a>
+                            )}
                           </span>
                           <span className="shrink-0 text-[10px] font-mono text-muted-foreground/80">
                             {ex.sets ?? '?'}×{ex.reps ?? '?'}

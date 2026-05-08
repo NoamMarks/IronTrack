@@ -79,6 +79,62 @@ create table public.invite_codes (
 create index invite_codes_code_idx     on public.invite_codes(code);
 create index invite_codes_coach_id_idx on public.invite_codes(coach_id);
 
+-- ─── program_templates ───────────────────────────────────────────────────────
+-- Coach Template Library. Reusable program shells, owned by the coach who
+-- created them, materialised into a live `programs` row when assigned to a
+-- trainee. JSONB snapshot rather than normalised sibling tables — see the
+-- 2026-05-09_program_templates migration for the rationale.
+create table public.program_templates (
+  id              uuid primary key default uuid_generate_v4(),
+  coach_id        uuid not null references public.profiles(id) on delete cascade,
+  name            text not null,
+  description     text,
+  -- { columns: ProgramColumn[], weeks: WorkoutWeek[] } — see snapshotProgram
+  -- in src/hooks/useTemplates.ts for the exact shape.
+  program_data    jsonb not null,
+  created_at      timestamptz not null default now()
+);
+
+create index program_templates_coach_id_idx on public.program_templates(coach_id);
+
+-- ─── exercise_library ────────────────────────────────────────────────────────
+-- Shared catalogue of named lifts that the Program Editor's exercise picker
+-- pulls from. Two row variants live in the same table:
+--   • Global rows  — coach_id IS NULL, tenant_id IS NULL. Visible to every
+--                    authenticated user. Seeded with 10 core lifts.
+--   • Coach rows   — coach_id = the owning coach's profile id. Visible only
+--                    to that coach (and superadmin). Each coach maintains
+--                    their own additions; tenants do NOT share custom rows
+--                    in this initial design.
+-- See 2026-05-09_exercise_library migration for the rationale + seed.
+do $$ begin
+  create type exercise_category as enum ('squat', 'bench', 'deadlift', 'accessory');
+exception when duplicate_object then null; end $$;
+
+create table public.exercise_library (
+  id          uuid primary key default uuid_generate_v4(),
+  -- Both nullable: globals carry NULL/NULL, coach additions carry their own
+  -- coach_id and (denormalised) tenant_id.
+  tenant_id   uuid references public.profiles(id) on delete cascade,
+  coach_id    uuid references public.profiles(id) on delete cascade,
+  name        text not null check (length(trim(name)) > 0),
+  category    exercise_category not null default 'accessory',
+  video_url   text,
+  created_at  timestamptz not null default now()
+);
+
+create index exercise_library_coach_id_idx on public.exercise_library(coach_id);
+create index exercise_library_category_idx on public.exercise_library(category);
+
+-- Two partial unique indexes — NULL ≠ NULL in UNIQUE, so we can't dedupe
+-- both row variants with a single index.
+create unique index exercise_library_coach_uniq_idx
+  on public.exercise_library(coach_id, lower(name))
+  where coach_id is not null;
+create unique index exercise_library_global_uniq_idx
+  on public.exercise_library(lower(name))
+  where coach_id is null;
+
 -- ─── programs ────────────────────────────────────────────────────────────────
 create table public.programs (
   id            uuid primary key default uuid_generate_v4(),
@@ -120,16 +176,25 @@ create index weeks_program_id_idx on public.weeks(program_id);
 
 -- ─── days ────────────────────────────────────────────────────────────────────
 create table public.days (
-  id           uuid primary key default uuid_generate_v4(),
-  week_id      uuid not null references public.weeks(id) on delete cascade,
-  day_number   int  not null check (day_number >= 1),
-  name         text not null default 'New Workout',
+  id               uuid primary key default uuid_generate_v4(),
+  week_id          uuid not null references public.weeks(id) on delete cascade,
+  day_number       int  not null check (day_number >= 1),
+  name             text not null default 'New Workout',
   -- Set when the trainee saves the session for this day. Null = unlogged.
-  logged_at    timestamptz,
-  created_at   timestamptz not null default now()
+  logged_at        timestamptz,
+  -- Post-workout reflection: 1-5 difficulty + free-text note. Null until the
+  -- trainee submits the reflection modal; nullable so existing logged days
+  -- aren't retroactively required to have one.
+  difficulty       smallint check (difficulty is null or (difficulty >= 1 and difficulty <= 5)),
+  reflection_note  text,
+  reflection_at    timestamptz,
+  created_at       timestamptz not null default now()
 );
 
 create index days_week_id_idx on public.days(week_id);
+create index days_reflection_at_idx
+  on public.days (reflection_at desc nulls last)
+  where reflection_at is not null;
 
 -- ─── exercises ───────────────────────────────────────────────────────────────
 create table public.exercises (
@@ -181,12 +246,14 @@ as $$
   select tenant_id from public.profiles where id = auth.uid();
 $$;
 
-alter table public.profiles      enable row level security;
-alter table public.invite_codes  enable row level security;
-alter table public.programs      enable row level security;
-alter table public.weeks         enable row level security;
-alter table public.days          enable row level security;
-alter table public.exercises     enable row level security;
+alter table public.profiles           enable row level security;
+alter table public.invite_codes       enable row level security;
+alter table public.program_templates  enable row level security;
+alter table public.exercise_library   enable row level security;
+alter table public.programs           enable row level security;
+alter table public.weeks              enable row level security;
+alter table public.days               enable row level security;
+alter table public.exercises          enable row level security;
 
 -- ─── profiles ────────────────────────────────────────────────────────────────
 -- A user can read their own profile + everyone in their tenant. Superadmin
@@ -367,6 +434,61 @@ create policy "exercises_all"
         or public.current_role() = 'superadmin'
       )
   ));
+
+-- ─── program_templates ───────────────────────────────────────────────────────
+-- Templates are private to their owning coach — no tenant-wide sharing. Only
+-- coaches (or superadmin) can create them; trainees never read or write here.
+create policy "program_templates_select"
+  on public.program_templates for select to authenticated
+  using (
+    coach_id = auth.uid()
+    or public.current_role() = 'superadmin'
+  );
+
+create policy "program_templates_insert"
+  on public.program_templates for insert to authenticated
+  with check (
+    coach_id = auth.uid()
+    and (public.current_role() = 'admin' or public.current_role() = 'superadmin')
+  );
+
+create policy "program_templates_update"
+  on public.program_templates for update to authenticated
+  using (coach_id = auth.uid() or public.current_role() = 'superadmin')
+  with check (coach_id = auth.uid() or public.current_role() = 'superadmin');
+
+create policy "program_templates_delete"
+  on public.program_templates for delete to authenticated
+  using (coach_id = auth.uid() or public.current_role() = 'superadmin');
+
+-- ─── exercise_library ───────────────────────────────────────────────────────
+-- Globals (coach_id NULL) are world-readable to authenticated users. Coach
+-- rows are owner-private. Inserts are restricted to coaches (own coach_id)
+-- and superadmin (for global seeding); updates/deletes are owner-only.
+create policy "exercise_library_select"
+  on public.exercise_library for select to authenticated
+  using (
+    coach_id is null
+    or coach_id = auth.uid()
+    or public.current_role() = 'superadmin'
+  );
+
+create policy "exercise_library_insert"
+  on public.exercise_library for insert to authenticated
+  with check (
+    (coach_id = auth.uid()
+      and (public.current_role() = 'admin' or public.current_role() = 'superadmin'))
+    or (coach_id is null and public.current_role() = 'superadmin')
+  );
+
+create policy "exercise_library_update"
+  on public.exercise_library for update to authenticated
+  using (coach_id = auth.uid() or public.current_role() = 'superadmin')
+  with check (coach_id = auth.uid() or public.current_role() = 'superadmin');
+
+create policy "exercise_library_delete"
+  on public.exercise_library for delete to authenticated
+  using (coach_id = auth.uid() or public.current_role() = 'superadmin');
 
 -- =============================================================================
 -- Auth → profile bootstrap trigger

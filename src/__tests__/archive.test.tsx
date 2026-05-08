@@ -18,6 +18,27 @@ vi.mock('../components/admin/ProgramEditor', () => ({
   ),
 }));
 
+// Stub the recent-activity sidebar — it opens a Supabase realtime channel
+// at mount, which has no place in a JSDOM unit test.
+vi.mock('../components/admin/RecentActivityPanel', () => ({
+  RecentActivityPanel: () => <div data-testid="activity-stub" />,
+}));
+
+// Stub the templates hook — its mount-time fetch hits Supabase. Returning
+// an empty list keeps the AdminView zero-state simple (no "Load from
+// Template" branch). The save/delete handlers are no-ops; tests that
+// exercise them would re-mock locally.
+vi.mock('../hooks/useTemplates', () => ({
+  useTemplates: () => ({
+    templates: [],
+    isLoading: false,
+    error: null,
+    saveTemplate: vi.fn().mockResolvedValue(undefined),
+    deleteTemplate: vi.fn().mockResolvedValue(undefined),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
 // Provide the build-time global used by the dashboards' footer
 (globalThis as unknown as { __APP_VERSION__: string }).__APP_VERSION__ = 'test';
 

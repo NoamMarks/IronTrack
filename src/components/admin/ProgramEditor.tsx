@@ -1,10 +1,13 @@
 import { useState } from 'react';
-import { Edit3, Trash2, X } from 'lucide-react';
+import { Edit3, Trash2, X, BookmarkPlus } from 'lucide-react';
 import { TechnicalCard, TechnicalInput } from '../ui';
 import { ColumnModal } from './ColumnModal';
+import { SaveTemplateModal } from './SaveTemplateModal';
+import { ExerciseCombobox } from './ExerciseCombobox';
 import { cn } from '../../lib/utils';
 import { DEFAULT_COLUMNS } from '../../constants/mockData';
 import { sanitizeOnType, clampOnCommit, kindForColumnId, RANGES } from '../../lib/numericInput';
+import { useExerciseLibrary } from '../../hooks/useExerciseLibrary';
 import type { Program, ProgramColumn, ExercisePlan } from '../../types';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
@@ -25,13 +28,23 @@ function getExerciseValue(ex: ExercisePlan, colId: string): string | number | un
 interface ProgramEditorProps {
   program: Program;
   onChange: (updated: Program) => void;
+  /** Optional handler — when provided, a "Save as Template" button is
+   *  rendered next to the program name. The parent owns the templates
+   *  hook so this component stays presentational. */
+  onSaveAsTemplate?: (name: string, description: string) => Promise<void>;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
+export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEditorProps) {
   const [columnModalOpen, setColumnModalOpen] = useState(false);
   const [editingColumn, setEditingColumn] = useState<ProgramColumn | null>(null);
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+
+  // Coach exercise library — globals + the coach's own additions. Mounted
+  // here so the Combo Box in every row reads from one shared, cached list
+  // rather than each input issuing its own fetch.
+  const { exercises: libraryExercises, addExerciseToLibrary } = useExerciseLibrary();
 
   const allCols = program.columns ?? DEFAULT_COLUMNS;
 
@@ -235,6 +248,60 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
     });
   };
 
+  /**
+   * Atomic name + videoUrl swap for the exercise-library Combo Box pick.
+   *
+   * `updateExercise` only handles one field per call, and React state
+   * updates inside a single tick can race — calling it twice in a row to
+   * set name then videoUrl would lose one of the two values when the
+   * second call reads the pre-first-call `program` from the closure.
+   *
+   * Mirrors the propagation rule in `updateExercise`: `exerciseName` is a
+   * plan field (every day with the matching `dayNumber` and exercise
+   * index gets the new name), while `videoUrl` is per-instance — the
+   * coach's video link only attaches to the row they picked from. That
+   * keeps trainee-uploaded session videos (which also live on videoUrl)
+   * from being clobbered across other weeks.
+   */
+  const selectExerciseFromLibrary = (
+    weekId: string,
+    dayId: string,
+    exId: string,
+    name: string,
+    videoUrl: string | undefined,
+  ) => {
+    const day = program.weeks.find((w) => w.id === weekId)?.days.find((d) => d.id === dayId);
+    if (!day) return;
+    const exIndex = day.exercises.findIndex((ex) => ex.id === exId);
+    if (exIndex === -1) return;
+
+    onChange({
+      ...program,
+      weeks: program.weeks.map((w) => ({
+        ...w,
+        days: w.days.map((d) =>
+          d.dayNumber === day.dayNumber
+            ? {
+                ...d,
+                exercises: d.exercises.map((ex, idx) => {
+                  if (idx !== exIndex) return ex;
+                  // Plan-field propagation: every same-position row in
+                  // every week of the dayNumber gets the name.
+                  const next = { ...ex, exerciseName: name };
+                  // Per-instance: only the actual row the coach picked
+                  // from gets the videoUrl assignment.
+                  if (w.id === weekId && d.id === dayId && ex.id === exId) {
+                    next.videoUrl = videoUrl;
+                  }
+                  return next;
+                }),
+              }
+            : d,
+        ),
+      })),
+    });
+  };
+
   /** Final clamp on blur for numeric program-editor cells. Without this, a
    *  coach who types "0" into RPE and tabs away leaves it below the 1.0
    *  floor. Free-text columns get no-op'd. */
@@ -276,15 +343,26 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
     <>
       {/* Toolbar */}
       <div className="flex justify-between items-center bg-card p-6 border border-border shadow-sm">
-        <div className="flex items-center space-x-4">
-          <Edit3 className="w-6 h-6 text-muted-foreground" />
+        <div className="flex items-center space-x-4 min-w-0">
+          <Edit3 className="w-6 h-6 text-muted-foreground shrink-0" />
           <input
             value={program.name}
             onChange={(e) => onChange({ ...program, name: e.target.value })}
             maxLength={150}
             title={program.name}
-            className="text-3xl font-bold italic font-serif bg-transparent border-none outline-none focus:ring-0 p-0 text-foreground overflow-hidden text-ellipsis whitespace-nowrap"
+            className="text-3xl font-bold italic font-serif bg-transparent border-none outline-none focus:ring-0 p-0 text-foreground overflow-hidden text-ellipsis whitespace-nowrap min-w-0"
           />
+          {onSaveAsTemplate && (
+            <button
+              onClick={() => setSaveTemplateOpen(true)}
+              data-testid="save-as-template-btn"
+              title="Save this program structure as a reusable template"
+              className="shrink-0 flex items-center gap-1.5 border border-border text-muted-foreground hover:border-foreground hover:text-foreground px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest transition-colors"
+            >
+              <BookmarkPlus className="w-3.5 h-3.5" />
+              Save as Template
+            </button>
+          )}
         </div>
         <div className="flex space-x-3">
           <button
@@ -412,9 +490,21 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
                             className="grid gap-4 items-center bg-card p-3 border border-border hover:border-muted-foreground transition-all group shadow-sm"
                             style={{ gridTemplateColumns: gridTemplate }}
                           >
-                            <TechnicalInput
+                            <ExerciseCombobox
                               value={ex.exerciseName}
                               onChange={(v) => updateExercise(week.id, day.id, ex.id, 'exerciseName', v)}
+                              onSelect={(name, videoUrl) =>
+                                selectExerciseFromLibrary(week.id, day.id, ex.id, name, videoUrl)
+                              }
+                              onSaveToLibrary={async (name) => {
+                                // Persist the row's current videoUrl alongside the name so
+                                // future programs that pick this entry from the dropdown
+                                // get the technique reference for free. If the row has no
+                                // video yet, the entry saves with an empty url and the
+                                // coach can attach one later by re-saving.
+                                await addExerciseToLibrary(name, ex.videoUrl ?? '');
+                              }}
+                              exercises={libraryExercises}
                               maxLength={150}
                               title={ex.exerciseName}
                               className="overflow-hidden text-ellipsis whitespace-nowrap"
@@ -489,6 +579,15 @@ export function ProgramEditor({ program, onChange }: ProgramEditorProps) {
         editingColumn={editingColumn}
         onSave={handleSaveColumn}
       />
+
+      {onSaveAsTemplate && (
+        <SaveTemplateModal
+          isOpen={saveTemplateOpen}
+          initialName={program.name}
+          onClose={() => setSaveTemplateOpen(false)}
+          onSave={onSaveAsTemplate}
+        />
+      )}
     </>
   );
 }

@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Trash2, Archive, Link2, Link as LinkIcon, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Trash2, Archive, Link2, Link as LinkIcon, Copy, Check, Library } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProgramEditor } from './ProgramEditor';
+import { RecentActivityPanel } from './RecentActivityPanel';
+import { TemplateBrowser } from './TemplateBrowser';
+import { Modal } from '../ui';
 import { cn } from '../../lib/utils';
 import {
   createInviteCode,
@@ -9,7 +12,8 @@ import {
   deleteInviteCode,
   buildInviteLink,
 } from '../../lib/inviteCodes';
-import type { Client, Program, InviteCode } from '../../types';
+import { useTemplates, type ProgramTemplate } from '../../hooks/useTemplates';
+import type { Client, Program, InviteCode, ProgramColumn, WorkoutWeek } from '../../types';
 
 const activeProgramOf = (c: Client | null): Program | null =>
   c?.programs.find((p) => p.status !== 'archived') ?? null;
@@ -20,6 +24,13 @@ interface AdminViewProps {
   isLoadingData?: boolean;
   onSaveProgram: (program: Program) => Promise<void>;
   onCreateProgram: (clientId: string) => Promise<Program>;
+  /** Materialise a saved template into a new live program for the given
+   *  client. Provided by useProgramData so the local clients tree picks
+   *  up the new program without a refetch. */
+  onCreateProgramFromTemplate?: (
+    clientId: string,
+    template: { name: string; columns: ProgramColumn[]; weeks: WorkoutWeek[] },
+  ) => Promise<Program>;
   onDeleteClient: (clientId: string) => Promise<void>;
   onArchiveProgram: (clientId: string, programId: string) => Promise<void>;
   onBack: () => void;
@@ -31,6 +42,7 @@ export function AdminView({
   isLoadingData,
   onSaveProgram,
   onCreateProgram,
+  onCreateProgramFromTemplate,
   onDeleteClient,
   onArchiveProgram,
   onBack,
@@ -46,6 +58,16 @@ export function AdminView({
   // Invite code state — async fetched from Supabase in Phase 3.
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
   const [copied, setCopied] = useState<{ id: string; kind: 'code' | 'link' } | null>(null);
+
+  // Template library state. The hook self-resolves the coach via auth.uid()
+  // and RLS — no need to thread `authenticatedUser` through.
+  const {
+    templates,
+    isLoading: isTemplatesLoading,
+    saveTemplate,
+    deleteTemplate,
+  } = useTemplates();
+  const [loadTemplateOpen, setLoadTemplateOpen] = useState(false);
 
   // Load invite codes
   useEffect(() => {
@@ -132,6 +154,42 @@ export function AdminView({
       console.error('[IronTrack admin] createProgram failed', err);
     }
   };
+
+  // Save the program currently in the editor as a reusable template. The
+  // ProgramEditor renders the modal and delegates to this handler so the
+  // editor stays presentational and the templates hook stays scoped to
+  // AdminView.
+  const handleSaveAsTemplate = useCallback(
+    async (name: string, description: string) => {
+      if (!editingProgram) {
+        throw new Error('No active program to save.');
+      }
+      // Flush any in-flight debounced edits FIRST so the snapshot reflects
+      // the absolute latest state of the editor — without this, saving a
+      // template right after a keystroke captures the pre-edit version.
+      flushSave();
+      await saveTemplate(name, editingProgram, description);
+    },
+    [editingProgram, flushSave, saveTemplate],
+  );
+
+  const handleLoadTemplate = useCallback(
+    async (template: ProgramTemplate) => {
+      if (!selectedClient || !onCreateProgramFromTemplate) return;
+      try {
+        const newProgram = await onCreateProgramFromTemplate(selectedClient.id, {
+          name: template.name,
+          columns: template.columns,
+          weeks: template.weeks,
+        });
+        setEditingProgram(newProgram);
+        setLoadTemplateOpen(false);
+      } catch (err) {
+        console.error('[IronTrack admin] loadTemplate failed', err);
+      }
+    },
+    [selectedClient, onCreateProgramFromTemplate],
+  );
 
   const handleArchiveProgram = async () => {
     if (!selectedClient || !editingProgram) return;
@@ -328,7 +386,7 @@ export function AdminView({
         )}
       </div>
 
-      <div className="grid grid-cols-[300px_1fr] gap-12">
+      <div className="grid grid-cols-[300px_1fr] xl:grid-cols-[300px_1fr_320px] gap-8 xl:gap-10">
         {/* Client list */}
         <div className="space-y-6">
           <h3 className="text-xs font-mono uppercase text-muted-foreground tracking-widest border-b border-border pb-2">
@@ -384,7 +442,11 @@ export function AdminView({
                   Archive Current Block
                 </button>
               </div>
-              <ProgramEditor program={editingProgram} onChange={handleProgramChange} />
+              <ProgramEditor
+                program={editingProgram}
+                onChange={handleProgramChange}
+                onSaveAsTemplate={handleSaveAsTemplate}
+              />
             </>
           ) : (
             <div className="flex flex-col items-center justify-center py-32 space-y-6">
@@ -394,21 +456,66 @@ export function AdminView({
               <h2 className="text-4xl font-bold italic font-serif text-foreground tracking-tight">
                 Ready to Build?
               </h2>
-              <button
-                onClick={handleCreateProgram}
-                className="bg-foreground text-background px-8 py-4 text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all shadow-lg"
-              >
-                + Create New Block
-              </button>
+              <div className="flex flex-wrap gap-3 justify-center">
+                <button
+                  onClick={handleCreateProgram}
+                  data-testid="create-block-btn"
+                  className="bg-foreground text-background px-8 py-4 text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all shadow-lg"
+                >
+                  + Create New Block
+                </button>
+                {onCreateProgramFromTemplate && (
+                  <button
+                    onClick={() => setLoadTemplateOpen(true)}
+                    data-testid="open-template-browser-btn"
+                    className="flex items-center gap-2 border border-foreground text-foreground px-8 py-4 text-xs font-bold uppercase tracking-widest hover:bg-foreground hover:text-background transition-all shadow-sm"
+                  >
+                    <Library className="w-4 h-4" />
+                    Load from Template
+                  </button>
+                )}
+              </div>
+              {onCreateProgramFromTemplate && templates.length > 0 && (
+                <p className="text-[10px] font-mono text-muted-foreground/70 uppercase tracking-widest">
+                  {templates.length} {templates.length === 1 ? 'template' : 'templates'} in your library
+                </p>
+              )}
             </div>
           )}
         </div>
+
+        {/* Recent activity — third column on xl+, hidden on smaller widths
+            so the program editor keeps room to breathe. The realtime
+            subscription stays mounted whenever this is rendered, so the
+            feed populates the moment a trainee submits a reflection. */}
+        <RecentActivityPanel
+          tenantId={authenticatedUser.tenantId ?? authenticatedUser.id}
+          className="hidden xl:flex sticky top-24 self-start max-h-[calc(100vh-9rem)]"
+        />
       </div>
 
       {/* Version footer */}
       <div className="text-center text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest pt-4">
         IronTrack v{__APP_VERSION__}
       </div>
+
+      {/* Load-from-Template modal — wraps the reusable TemplateBrowser with
+          an onLoad action wired to createProgramFromTemplate. The browser
+          itself still renders without a Load action when used elsewhere
+          (e.g. a future "manage my library" surface). */}
+      <Modal
+        isOpen={loadTemplateOpen}
+        onClose={() => setLoadTemplateOpen(false)}
+        title="Load from Template"
+      >
+        <TemplateBrowser
+          templates={templates}
+          isLoading={isTemplatesLoading}
+          onLoad={handleLoadTemplate}
+          onDelete={async (t) => { await deleteTemplate(t.id); }}
+          className="max-h-[60vh] overflow-y-auto pr-1"
+        />
+      </Modal>
     </div>
   );
 }

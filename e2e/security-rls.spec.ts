@@ -329,4 +329,240 @@ test.describe(`Security RLS — ${HAS_REAL ? 'real Supabase' : 'SKIPPED (no env)
       expect(data ?? []).toEqual([]);
     }
   });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // program_templates — coach-private library, no globals, no tenant share
+  // ─────────────────────────────────────────────────────────────────────────
+  test('Coach A cannot SELECT Coach B\'s program_templates', async () => {
+    expect(env).not.toBeNull();
+    const admin = adminClient(env!);
+
+    // Seed one template owned by Coach B via service role (bypasses RLS).
+    const { data: tpl, error: insertErr } = await admin
+      .from('program_templates')
+      .insert({
+        coach_id: coachB!.id,
+        name: 'RLS Probe — Coach B Template',
+        program_data: { columns: [], weeks: [] },
+      })
+      .select('id')
+      .single<{ id: string }>();
+    if (insertErr || !tpl) {
+      test.skip(true, `program_templates table not deployed: ${insertErr?.message ?? 'unknown'}`);
+      return;
+    }
+
+    try {
+      const client = userClient(env!);
+      await client.auth.signInWithPassword({ email: coachA!.email, password: coachA!.password });
+
+      // Both forms: filter by id (most direct), and unfiltered list.
+      const byId = await client.from('program_templates').select('id, name').eq('id', tpl.id);
+      expect(byId.error).toBeNull();
+      expect(byId.data ?? []).toEqual([]);
+
+      const all = await client.from('program_templates').select('id, coach_id');
+      expect(all.error).toBeNull();
+      // Coach A's own list should never include Coach B's row.
+      const leaked = (all.data ?? []).filter((r: { coach_id: string }) => r.coach_id === coachB!.id);
+      expect(leaked).toEqual([]);
+    } finally {
+      await admin.from('program_templates').delete().eq('id', tpl.id).then(() => undefined, () => undefined);
+    }
+  });
+
+  test('Coach A cannot INSERT a program_template with coach_id=B', async () => {
+    expect(env).not.toBeNull();
+    const client = userClient(env!);
+    await client.auth.signInWithPassword({ email: coachA!.email, password: coachA!.password });
+
+    const { data, error } = await client
+      .from('program_templates')
+      .insert({
+        coach_id: coachB!.id, // attempting to plant a template in B's library
+        name: 'CrossTenantProbe',
+        program_data: { columns: [], weeks: [] },
+      })
+      .select();
+
+    // INSERT policy `with check (coach_id = auth.uid())` → the row never lands.
+    expect(data ?? []).toEqual([]);
+    if (!error) {
+      const admin = adminClient(env!);
+      const { data: leaked } = await admin
+        .from('program_templates')
+        .select('id')
+        .eq('name', 'CrossTenantProbe');
+      expect(leaked ?? []).toEqual([]);
+    }
+  });
+
+  test('Trainee cannot INSERT into program_templates (admin-only library)', async () => {
+    expect(env).not.toBeNull();
+    const client = userClient(env!);
+    await client.auth.signInWithPassword({ email: traineeA!.email, password: traineeA!.password });
+
+    const { data, error } = await client
+      .from('program_templates')
+      .insert({
+        coach_id: traineeA!.id,
+        name: 'TraineeAuthoredTemplate',
+        program_data: { columns: [], weeks: [] },
+      })
+      .select();
+    expect(data ?? []).toEqual([]);
+    if (!error) {
+      const admin = adminClient(env!);
+      const { data: leaked } = await admin
+        .from('program_templates')
+        .select('id')
+        .eq('name', 'TraineeAuthoredTemplate');
+      expect(leaked ?? []).toEqual([]);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // exercise_library — globals visible to all, coach rows owner-private
+  // ─────────────────────────────────────────────────────────────────────────
+  test('Both coaches can SELECT seeded global exercises', async () => {
+    expect(env).not.toBeNull();
+    const admin = adminClient(env!);
+    const { data: globals } = await admin
+      .from('exercise_library')
+      .select('id, name')
+      .is('coach_id', null);
+    if (!globals || globals.length === 0) {
+      test.skip(true, 'No globals seeded — exercise_library migration may not be applied.');
+      return;
+    }
+
+    for (const user of [coachA!, coachB!]) {
+      const client = userClient(env!);
+      await client.auth.signInWithPassword({ email: user.email, password: user.password });
+      const { data, error } = await client
+        .from('exercise_library')
+        .select('id')
+        .is('coach_id', null);
+      expect(error).toBeNull();
+      // Every coach should see at least the seeded globals.
+      expect((data ?? []).length).toBeGreaterThanOrEqual(globals.length);
+    }
+  });
+
+  test('Coach A cannot SELECT Coach B\'s private exercise_library rows', async () => {
+    expect(env).not.toBeNull();
+    const admin = adminClient(env!);
+
+    const { data: row, error: insertErr } = await admin
+      .from('exercise_library')
+      .insert({
+        coach_id: coachB!.id,
+        tenant_id: coachB!.id,
+        name: 'RLS Probe — Coach B Variation',
+        category: 'accessory',
+      })
+      .select('id')
+      .single<{ id: string }>();
+    if (insertErr || !row) {
+      test.skip(true, `exercise_library table not deployed: ${insertErr?.message ?? 'unknown'}`);
+      return;
+    }
+
+    try {
+      const client = userClient(env!);
+      await client.auth.signInWithPassword({ email: coachA!.email, password: coachA!.password });
+
+      const { data, error } = await client
+        .from('exercise_library')
+        .select('id, coach_id, name')
+        .eq('id', row.id);
+      expect(error).toBeNull();
+      expect(data ?? []).toEqual([]);
+
+      // Coach A's general list should also exclude B's rows.
+      const list = await client.from('exercise_library').select('id, coach_id');
+      expect(list.error).toBeNull();
+      const leaked = (list.data ?? []).filter((r: { coach_id: string | null }) => r.coach_id === coachB!.id);
+      expect(leaked).toEqual([]);
+    } finally {
+      await admin.from('exercise_library').delete().eq('id', row.id).then(() => undefined, () => undefined);
+    }
+  });
+
+  test('Coach A cannot INSERT into exercise_library with coach_id=B', async () => {
+    expect(env).not.toBeNull();
+    const client = userClient(env!);
+    await client.auth.signInWithPassword({ email: coachA!.email, password: coachA!.password });
+
+    const { data, error } = await client
+      .from('exercise_library')
+      .insert({
+        coach_id: coachB!.id,
+        tenant_id: coachB!.id,
+        name: 'CrossTenantExercise',
+        category: 'accessory',
+      })
+      .select();
+
+    expect(data ?? []).toEqual([]);
+    if (!error) {
+      const admin = adminClient(env!);
+      const { data: leaked } = await admin
+        .from('exercise_library')
+        .select('id')
+        .eq('name', 'CrossTenantExercise');
+      expect(leaked ?? []).toEqual([]);
+    }
+  });
+
+  test('Coach cannot INSERT a global (coach_id=NULL) exercise — superadmin-only', async () => {
+    expect(env).not.toBeNull();
+    const client = userClient(env!);
+    await client.auth.signInWithPassword({ email: coachA!.email, password: coachA!.password });
+
+    const { data, error } = await client
+      .from('exercise_library')
+      .insert({
+        coach_id: null,
+        tenant_id: null,
+        name: 'CoachAuthoredGlobal',
+        category: 'accessory',
+      })
+      .select();
+
+    expect(data ?? []).toEqual([]);
+    if (!error) {
+      const admin = adminClient(env!);
+      const { data: leaked } = await admin
+        .from('exercise_library')
+        .select('id')
+        .eq('name', 'CoachAuthoredGlobal');
+      expect(leaked ?? []).toEqual([]);
+    }
+  });
+
+  test('Trainee cannot INSERT into exercise_library (admin-only library)', async () => {
+    expect(env).not.toBeNull();
+    const client = userClient(env!);
+    await client.auth.signInWithPassword({ email: traineeA!.email, password: traineeA!.password });
+
+    const { data, error } = await client
+      .from('exercise_library')
+      .insert({
+        coach_id: traineeA!.id,
+        tenant_id: traineeA!.id,
+        name: 'TraineeAuthoredExercise',
+        category: 'accessory',
+      })
+      .select();
+    expect(data ?? []).toEqual([]);
+    if (!error) {
+      const admin = adminClient(env!);
+      const { data: leaked } = await admin
+        .from('exercise_library')
+        .select('id')
+        .eq('name', 'TraineeAuthoredExercise');
+      expect(leaked ?? []).toEqual([]);
+    }
+  });
 });

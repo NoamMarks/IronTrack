@@ -52,7 +52,7 @@ export function estimate1RM(weight: number, reps: number, rpe?: number): number 
 // ─── Relative-strength scoring ───────────────────────────────────────────────
 
 export type Gender = 'male' | 'female';
-export type PointsFormula = 'wilks' | 'ipf-gl';
+export type PointsFormula = 'wilks' | 'ipf-gl' | 'dots';
 
 // Wilks 2020 update coefficients (Robert Wilks, 2020). The score is the
 // athlete's total times 600 divided by a 5th-degree polynomial of their
@@ -81,6 +81,21 @@ const WILKS_2020_WOMEN = [
 // different constants and are out of scope for the calculator.
 const IPF_GL_CLASSIC_MEN   = { A: 1199.72839, B: 1025.18162, C: 0.00921    } as const;
 const IPF_GL_CLASSIC_WOMEN = { A:  610.32796, B: 1045.59282, C: 0.03048    } as const;
+
+// DOTS (2020) — the openpowerlifting-blessed Wilks successor. Score is
+// total × 500 / (a·BW⁴ + b·BW³ + c·BW² + d·BW + e), with the bodyweight
+// clamped into a per-sex range so out-of-domain inputs return a sane
+// extrapolation rather than a polynomial divergence. Coefficients listed
+// from highest power (BW⁴) down to constant.
+const DOTS_MEN = {
+  coefs: [-0.000001093, 0.0007391293, -0.1918759221, 24.0900756, -307.75076] as const,
+  bwMin: 40, bwMax: 210,
+} as const;
+
+const DOTS_WOMEN = {
+  coefs: [-0.0000010706, 0.00079484, -0.16711582, 13.6175032, -57.96288] as const,
+  bwMin: 40, bwMax: 150,
+} as const;
 
 /**
  * Wilks 2020 or IPF GL Classic score for a competition total.
@@ -121,5 +136,36 @@ export function calculatePoints(
     return Math.round((total * 100 / denom) * 100) / 100;
   }
 
+  if (formula === 'dots') {
+    const { coefs, bwMin, bwMax } = gender === 'male' ? DOTS_MEN : DOTS_WOMEN;
+    const bw = Math.min(Math.max(bodyweight, bwMin), bwMax);
+    const [a, b, c, d, e] = coefs;
+    const denom = a * bw ** 4 + b * bw ** 3 + c * bw ** 2 + d * bw + e;
+    if (!Number.isFinite(denom) || denom <= 0) return null;
+    return Math.round((total * (500 / denom)) * 10) / 10;
+  }
+
   return null;
+}
+
+// ─── Strength tier ────────────────────────────────────────────────────────────
+
+export interface StrengthTier {
+  label: string;
+  /** Tailwind text-color class for the tier badge. */
+  color: string;
+}
+
+/**
+ * Coarse tier label calibrated to a 3-lift powerlifting total (DOTS or
+ * Wilks-equivalent score). Single-lift inputs will read lower than these
+ * thresholds suggest — surface that caveat in the calling UI.
+ */
+export function strengthTier(score: number | null): StrengthTier | null {
+  if (score === null) return null;
+  if (score < 200) return { label: 'Developing',   color: 'text-zinc-400'    };
+  if (score < 300) return { label: 'Intermediate', color: 'text-sky-400'     };
+  if (score < 400) return { label: 'Advanced',     color: 'text-emerald-400' };
+  if (score < 500) return { label: 'Elite',        color: 'text-amber-400'   };
+  return            { label: 'World-Class',        color: 'text-red-400'     };
 }

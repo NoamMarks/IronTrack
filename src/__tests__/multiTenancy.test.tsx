@@ -10,6 +10,25 @@ vi.mock('../components/admin/ProgramEditor', () => ({
   ),
 }));
 
+// Stub the recent-activity sidebar — it opens a Supabase realtime channel
+// at mount, which has no place in a JSDOM unit test.
+vi.mock('../components/admin/RecentActivityPanel', () => ({
+  RecentActivityPanel: () => <div data-testid="activity-stub" />,
+}));
+
+// Stub the templates hook — its mount-time Supabase fetch is irrelevant
+// to the tenant-isolation suite.
+vi.mock('../hooks/useTemplates', () => ({
+  useTemplates: () => ({
+    templates: [],
+    isLoading: false,
+    error: null,
+    saveTemplate: vi.fn().mockResolvedValue(undefined),
+    deleteTemplate: vi.fn().mockResolvedValue(undefined),
+    refresh: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
 (globalThis as unknown as { __APP_VERSION__: string }).__APP_VERSION__ = 'test';
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────

@@ -90,11 +90,35 @@ export interface MockInviteCode {
   use_count: number;
 }
 
+export interface MockTemplateRow {
+  id: string;
+  coach_id: string;
+  name: string;
+  description: string | null;
+  program_data: {
+    columns: Array<{ id: string; label: string; type: 'plan' | 'actual' }>;
+    weeks: Array<{ id: string; weekNumber: number; days: Array<{ id: string; dayNumber: number; name: string; exercises: unknown[] }> }>;
+  };
+  created_at: string;
+}
+
+export interface MockLibraryExerciseRow {
+  id: string;
+  coach_id: string | null;
+  tenant_id: string | null;
+  name: string;
+  category: 'squat' | 'bench' | 'deadlift' | 'accessory';
+  video_url: string | null;
+  created_at: string;
+}
+
 export interface MockState {
   authedUser: MockProfile;
   profiles: MockProfile[];
   programs: MockProgramRow[];
   inviteCodes: MockInviteCode[];
+  templates: MockTemplateRow[];
+  libraryExercises: MockLibraryExerciseRow[];
 }
 
 /** Default fixture: superadmin with one coach + one trainee + a 2-week program. */
@@ -185,11 +209,24 @@ export function defaultMockState(): MockState {
     active_program_id: programId,
   };
 
+  // Globals + a coach-private library row, mirroring the seed in the
+  // 2026-05-09_exercise_library migration. Trimmed to a couple of rows per
+  // category so visual tests can assert filtered counts deterministically.
+  const libraryExercises: MockLibraryExerciseRow[] = [
+    { id: 'lib-global-1', coach_id: null, tenant_id: null, name: 'Low Bar Back Squat',      category: 'squat',     video_url: 'https://www.youtube.com/@squatuniversity',          created_at: new Date().toISOString() },
+    { id: 'lib-global-2', coach_id: null, tenant_id: null, name: 'Competition Bench Press', category: 'bench',     video_url: 'https://www.youtube.com/@JuggernautTrainingSystems', created_at: new Date().toISOString() },
+    { id: 'lib-global-3', coach_id: null, tenant_id: null, name: 'Conventional Deadlift',   category: 'deadlift',  video_url: 'https://www.youtube.com/@JuggernautTrainingSystems', created_at: new Date().toISOString() },
+    { id: 'lib-global-4', coach_id: null, tenant_id: null, name: 'Romanian Deadlift',       category: 'accessory', video_url: 'https://www.youtube.com/@JuggernautTrainingSystems', created_at: new Date().toISOString() },
+    { id: 'lib-coach-1',  coach_id: coachId, tenant_id: coachId, name: 'Coach Variation A', category: 'accessory', video_url: 'https://example.com/coach-a',                       created_at: new Date().toISOString() },
+  ];
+
   return {
     authedUser: coachProfile,
     profiles: [superProfile, coachProfile, traineeProfile],
     programs: [program],
     inviteCodes: [],
+    templates: [],
+    libraryExercises,
   };
 }
 
@@ -391,6 +428,8 @@ export async function installMockSupabase(page: Page, state: MockState) {
         table === 'profiles' ? state.profiles as Record<string, unknown>[] :
         table === 'programs' ? state.programs as unknown as Record<string, unknown>[] :
         table === 'invite_codes' ? state.inviteCodes as unknown as Record<string, unknown>[] :
+        table === 'program_templates' ? state.templates as unknown as Record<string, unknown>[] :
+        table === 'exercise_library' ? state.libraryExercises as unknown as Record<string, unknown>[] :
         table === 'weeks' ? state.programs.flatMap((p) => p.weeks) as unknown as Record<string, unknown>[] :
         table === 'days' ? state.programs.flatMap((p) =>
           p.weeks.flatMap((w) => w.days)) as unknown as Record<string, unknown>[] :

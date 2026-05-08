@@ -66,6 +66,9 @@ interface DayRow {
   day_number: number;
   name: string;
   logged_at: string | null;
+  difficulty: number | null;
+  reflection_note: string | null;
+  reflection_at: string | null;
   exercises?: ExerciseRow[];
 }
 
@@ -113,6 +116,9 @@ function rowToProgram(row: ProgramRow): Program {
           dayNumber: d.day_number,
           name: d.name,
           loggedAt: d.logged_at ?? undefined,
+          difficulty: d.difficulty ?? undefined,
+          reflectionNote: d.reflection_note ?? undefined,
+          reflectionAt: d.reflection_at ?? undefined,
           exercises: (d.exercises ?? [])
             .slice()
             .sort((a, b) => a.position - b.position)
@@ -255,7 +261,7 @@ export function useProgramData(authenticatedUser: Client | null) {
       _programId: string,
       _weekId: string,
       day: WorkoutDay,
-      opts: { markComplete?: boolean } = {},
+      opts: { markComplete?: boolean; reflection?: { difficulty: number; note: string } } = {},
     ) => {
       // markComplete:
       //   true  → "Finish Workout" path. Stamps days.logged_at with now()
@@ -266,13 +272,36 @@ export function useProgramData(authenticatedUser: Client | null) {
       //           appearing as already finished.
       // Default true preserves the prior contract for any caller not yet
       // updated.
+      //
+      // reflection:
+      //   When the trainee submits the post-workout modal we persist
+      //   difficulty + note + reflection_at on the same row. The realtime
+      //   subscription on the coach side fires on this single UPDATE.
       const markComplete = opts.markComplete ?? true;
+      const reflection = opts.reflection;
 
-      const dayUpdate: { name: string; logged_at?: string } = { name: day.name };
+      const dayUpdate: {
+        name: string;
+        logged_at?: string;
+        difficulty?: number;
+        reflection_note?: string;
+        reflection_at?: string;
+      } = { name: day.name };
       let nextLoggedAt = day.loggedAt ?? null;
+      let nextDifficulty = day.difficulty;
+      let nextReflectionNote = day.reflectionNote;
+      let nextReflectionAt = day.reflectionAt;
       if (markComplete) {
         nextLoggedAt = new Date().toISOString();
         dayUpdate.logged_at = nextLoggedAt;
+      }
+      if (reflection) {
+        nextDifficulty = reflection.difficulty;
+        nextReflectionNote = reflection.note;
+        nextReflectionAt = new Date().toISOString();
+        dayUpdate.difficulty = reflection.difficulty;
+        dayUpdate.reflection_note = reflection.note;
+        dayUpdate.reflection_at = nextReflectionAt;
       }
       const { error: dayErr } = await supabase
         .from('days')
@@ -313,7 +342,13 @@ export function useProgramData(authenticatedUser: Client | null) {
               ...w,
               days: w.days.map((d) =>
                 d.id === day.id
-                  ? { ...day, loggedAt: nextLoggedAt ?? undefined }
+                  ? {
+                      ...day,
+                      loggedAt: nextLoggedAt ?? undefined,
+                      difficulty: nextDifficulty,
+                      reflectionNote: nextReflectionNote,
+                      reflectionAt: nextReflectionAt,
+                    }
                   : d,
               ),
             })),
@@ -428,6 +463,140 @@ export function useProgramData(authenticatedUser: Client | null) {
   );
 
   /**
+   * Materialise a saved template into a fresh, live `programs` row for
+   * `clientId`. Mints brand-new uuids for the program / weeks / days /
+   * exercises so the cloned tree never shares row keys with the source
+   * template (or with any other instantiation).
+   *
+   * Runtime fields on each template exercise (`actualLoad`, `actualRpe`,
+   * `notes`, `videoUrl`) are stripped here even though `snapshotProgram`
+   * doesn't strip them server-side — this is a defence-in-depth so a
+   * template that was saved from an in-flight session doesn't seed the
+   * new program with its actuals.
+   */
+  const createProgramFromTemplate = useCallback(
+    async (
+      clientId: string,
+      template: { name: string; columns: ProgramColumn[]; weeks: WorkoutWeek[] },
+    ): Promise<Program> => {
+      const programId = crypto.randomUUID();
+      const { data: programData, error: programErr } = await supabase
+        .from('programs')
+        .insert({
+          id: programId,
+          client_id: clientId,
+          tenant_id: tenantId,
+          name: template.name,
+          columns: template.columns,
+          status: 'active',
+        })
+        .select()
+        .single<ProgramRow>();
+      if (programErr || !programData) {
+        throw programErr ?? new Error('createProgramFromTemplate: no data returned');
+      }
+
+      // Promote the new program to the client's active slot — matches the
+      // empty-program path so trainees see it immediately on next refresh.
+      await supabase
+        .from('profiles')
+        .update({ active_program_id: programId })
+        .eq('id', clientId);
+
+      // Insert the week → day → exercise tree with fresh uuids. Each layer
+      // depends on the previous one's id, so we cannot bulk-insert across
+      // tables in a single round-trip — but each table can take all rows
+      // for that level in one INSERT.
+      const newWeeks: WorkoutWeek[] = [];
+      const sortedTemplateWeeks = [...template.weeks].sort((a, b) => a.weekNumber - b.weekNumber);
+
+      for (const tw of sortedTemplateWeeks) {
+        const weekId = crypto.randomUUID();
+        const { error: weekErr } = await supabase
+          .from('weeks')
+          .insert({ id: weekId, program_id: programId, week_number: tw.weekNumber });
+        if (weekErr) throw weekErr;
+
+        const newDays: WorkoutDay[] = [];
+        const sortedTemplateDays = [...tw.days].sort((a, b) => a.dayNumber - b.dayNumber);
+
+        for (const td of sortedTemplateDays) {
+          const dayId = crypto.randomUUID();
+          const { error: dayErr } = await supabase
+            .from('days')
+            .insert({ id: dayId, week_id: weekId, day_number: td.dayNumber, name: td.name });
+          if (dayErr) throw dayErr;
+
+          // Bulk insert the day's exercises in one round-trip.
+          const exerciseRows = td.exercises.map((ex, position) => ({
+            id: crypto.randomUUID(),
+            day_id: dayId,
+            position,
+            exercise_id: ex.exerciseId,
+            exercise_name: ex.exerciseName,
+            sets: ex.sets ?? null,
+            reps: ex.reps ?? null,
+            expected_rpe: ex.expectedRpe ?? null,
+            weight_range: ex.weightRange ?? null,
+            // Strip runtime actuals/notes — see method-level comment.
+            actual_load: null,
+            actual_rpe: null,
+            notes: null,
+            video_url: null,
+            values: ex.values ?? {},
+          }));
+
+          if (exerciseRows.length > 0) {
+            const { data: insertedExercises, error: exErr } = await supabase
+              .from('exercises')
+              .insert(exerciseRows)
+              .select();
+            if (exErr) throw exErr;
+
+            const newExercises: ExercisePlan[] = (insertedExercises ?? [])
+              .slice()
+              .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+              .map(rowToExercise);
+
+            newDays.push({
+              id: dayId,
+              dayNumber: td.dayNumber,
+              name: td.name,
+              exercises: newExercises,
+            });
+          } else {
+            newDays.push({
+              id: dayId,
+              dayNumber: td.dayNumber,
+              name: td.name,
+              exercises: [],
+            });
+          }
+        }
+
+        newWeeks.push({ id: weekId, weekNumber: tw.weekNumber, days: newDays });
+      }
+
+      const program: Program = {
+        id: programData.id,
+        name: programData.name,
+        columns: programData.columns ?? template.columns,
+        status: programData.status,
+        createdAt: programData.created_at,
+        tenantId: programData.tenant_id ?? undefined,
+        weeks: newWeeks,
+      };
+      setClients((prev) => prev.map((c) =>
+        c.id === clientId
+          ? { ...c, activeProgramId: programId, programs: [...c.programs, program] }
+          : c,
+      ));
+      return program;
+    },
+    [tenantId],
+  );
+
+  /**
    * Coach inviting a trainee — creates an invite code in the Supabase
    * invite_codes table. The legacy `addClient` parameters (name, email,
    * password, role) are accepted for callsite compatibility but ONLY tenantId
@@ -488,6 +657,7 @@ export function useProgramData(authenticatedUser: Client | null) {
     archiveProgram,
     deleteClient,
     createProgram,
+    createProgramFromTemplate,
     addClient,
     appendClient,
     getClientsForTenant,
