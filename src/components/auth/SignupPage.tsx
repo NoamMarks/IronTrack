@@ -6,7 +6,8 @@ import { cn } from '../../lib/utils';
 import { checkPasswordStrength } from '../../lib/crypto';
 import { isValidEmail, INVALID_EMAIL_MESSAGE } from '../../lib/validation';
 import { lookupInviteCode, consumeInviteCode, normalizeInviteCode } from '../../lib/inviteCodes';
-import { generateOTP, sendVerificationEmail } from '../../lib/verification';
+import { sendSupabaseOTP } from '../../lib/verification';
+import { supabase } from '../../lib/supabase';
 import type { InviteCode } from '../../types';
 
 interface SignupPageProps {
@@ -43,9 +44,9 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
   const [linkInviteRaw, setLinkInviteRaw] = useState<string>('');
   const [linkInviteInvalid, setLinkInviteInvalid] = useState(false);
 
-  // OTP state
+  // OTP state — Supabase verifies the code server-side, so we no longer
+  // hold the expected value locally.
   const [otp, setOtp] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState('');
   const [otpError, setOtpError] = useState('');
   const [resolvedTenantId, setResolvedTenantId] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -106,23 +107,46 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
 
     if (errs.length > 0) { setErrors(errs); return; }
 
-    // Generate OTP and "send" email
-    const code = generateOTP();
-    setGeneratedOtp(code);
+    // Invite is valid → ask Supabase Auth to generate + email a 6-digit OTP
+    // (delivered via the project's configured SMTP provider). Supabase also
+    // creates the auth user up front (shouldCreateUser: true) and waits for
+    // verifyOtp to confirm the email.
     setResolvedTenantId(invite!.tenantId);
-    sendVerificationEmail(email.trim(), code);
+    try {
+      await sendSupabaseOTP(email.trim());
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not send the verification email. Please try again.';
+      setErrors([message]);
+      return;
+    }
     setStep('verify');
     setErrors([]);
   };
 
   const handleVerify = async () => {
-    if (otp.trim() !== generatedOtp) {
-      setOtpError('Incorrect verification code. Please try again.');
-      return;
-    }
     setOtpError('');
     setSubmitting(true);
     try {
+      // Server-side OTP check — on success Supabase confirms the email and
+      // signs the user in (a session is now active in supabase.auth). The
+      // `type: 'signup'` value matches the OTP sent by signInWithOtp when
+      // shouldCreateUser created the user; if Supabase rejects the token as
+      // expired/invalid, swap to type: 'email'.
+      const { error: otpErr } = await supabase.auth.verifyOtp({
+        email: email.trim().toLowerCase(),
+        token: otp.trim(),
+        type: 'signup',
+      });
+      if (otpErr) {
+        setOtpError(otpErr.message || 'Incorrect verification code. Please try again.');
+        return;
+      }
+
+      // TODO(supabase-otp-migration): /api/signup-user calls
+      // admin.createUser, which now collides with the user Supabase OTP just
+      // created and will throw "User already registered". Until that endpoint
+      // is made idempotent (or retired in favor of a profile-only upsert),
+      // this onComplete call will fail end-to-end. See migration notes.
       await onComplete(
         name.trim(),
         email.trim(),
@@ -309,10 +333,11 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
 
                   <button
                     onClick={() => {
-                      const code = generateOTP();
-                      setGeneratedOtp(code);
-                      sendVerificationEmail(email.trim(), code);
                       setOtpError('');
+                      void sendSupabaseOTP(email.trim()).catch((err) => {
+                        const message = err instanceof Error ? err.message : 'Could not resend the code.';
+                        setOtpError(message);
+                      });
                     }}
                     className="w-full text-xs font-mono text-muted-foreground hover:text-foreground uppercase tracking-widest"
                   >

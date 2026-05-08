@@ -1,26 +1,45 @@
 /**
  * OTP Verification Service
  *
- * Generates 6-digit codes and delivers them via Resend API when configured,
- * falling back to console log when the API key is absent.
+ * Signup OTP delivery is now handled by Supabase Auth (Google SMTP configured
+ * in the project's Auth → SMTP settings). The custom Resend-backed
+ * `generateOTP` / `sendVerificationEmail` pair was retired here in favor of
+ * `sendSupabaseOTP`, which lets Supabase generate the code, store its hash
+ * server-side, and dispatch the email via the user's SMTP provider.
+ *
+ * The legacy reset-token store below (`createResetToken`, `validateResetToken`,
+ * `consumeResetToken`) is unused in production — `ForgotPasswordPage` calls
+ * `supabase.auth.resetPasswordForEmail` directly — but is still exercised by
+ * `__tests__/resetToken.test.ts`, so it stays put. The numeric-code helper
+ * those functions need is kept as an unexported helper.
  */
 
-import { sendVerificationEmailViaResend, sendPasswordResetEmailViaResend } from './email';
+import { sendPasswordResetEmailViaResend } from './email';
+import { supabase } from './supabase';
 
-/** Generate a random 6-digit numeric code. */
-export function generateOTP(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
+// ─── Supabase native OTP ────────────────────────────────────────────────────
 
 /**
- * Send a signup verification email.
- * Uses Resend when VITE_RESEND_API_KEY is set, otherwise logs to console.
+ * Send a 6-digit signup OTP via Supabase Auth. With `shouldCreateUser: true`,
+ * Supabase will create the auth user up front (passwordless) and only confirm
+ * their email after `verifyOtp` is called. The OTP itself is delivered through
+ * whatever SMTP service is configured in the Supabase dashboard.
+ *
+ * Throws when Supabase rejects the request (rate-limited, malformed email,
+ * SMTP outage, etc.) so the caller can surface the error in the UI.
  */
-export function sendVerificationEmail(email: string, code: string): void {
-  void sendVerificationEmailViaResend(email, code);
+export async function sendSupabaseOTP(email: string): Promise<void> {
+  const { error } = await supabase.auth.signInWithOtp({
+    email: email.trim().toLowerCase(),
+    options: { shouldCreateUser: true },
+  });
+  if (error) {
+    console.error('[IronTrack signup] sendSupabaseOTP error', error);
+    throw new Error(error.message);
+  }
 }
 
-// ─── Reset Token Service ────────────────────────────────────────────────────
+// ─── Reset Token Service (legacy, kept for tests) ───────────────────────────
 
 const RESET_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -44,17 +63,23 @@ export function _clearTokenStore(): void {
   tokenStore.length = 0;
 }
 
+/** Generate a random 6-digit numeric code. Used internally by the reset-token
+ *  store; not exposed because production OTP delivery now goes through
+ *  Supabase Auth (see sendSupabaseOTP). */
+function generateNumericCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
 /**
  * Create a reset token for the given email.
  * Invalidates any previous unused tokens for the same email.
  */
 export function createResetToken(email: string): ResetToken {
-  // Invalidate previous tokens for this email
   for (const t of tokenStore) {
     if (t.email === email && !t.used) t.used = true;
   }
   const token: ResetToken = {
-    code: generateOTP(),
+    code: generateNumericCode(),
     email: email.toLowerCase().trim(),
     createdAt: Date.now(),
     used: false,
@@ -90,7 +115,8 @@ export function consumeResetToken(email: string, code: string): void {
 
 /**
  * Send a password reset email.
- * Uses Resend when VITE_RESEND_API_KEY is set, otherwise logs to console.
+ * Currently still routed through the Resend-backed pipeline; will be migrated
+ * to Supabase's native reset flow in a follow-up.
  */
 export function sendPasswordResetEmail(email: string, code: string): void {
   void sendPasswordResetEmailViaResend(email, code);

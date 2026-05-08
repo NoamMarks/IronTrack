@@ -1,13 +1,21 @@
 /**
+ * @deprecated DELETE-AFTER-VERIFICATION
+ *
  * Vercel Serverless Function: POST /api/send-email
  *
- * Server-side mailroom for IronTrack. The frontend POSTs `{ to, subject, html }`
- * here and this function relays it through Resend using a strictly server-side
- * `RESEND_API_KEY` (NOT prefixed with VITE_, so the secret never reaches the
- * client bundle).
- *
- * Configure on Vercel → Settings → Environment Variables:
- *   RESEND_API_KEY = re_xxxxxxxxxxxxxxxxxxx
+ * Signup OTP delivery has migrated to Supabase Auth (Google SMTP configured
+ * via the Supabase dashboard) — see `sendSupabaseOTP` in src/lib/verification.ts.
+ * This endpoint and the `resend` npm dependency are no longer called by the
+ * client and should be deleted once production signup is confirmed working
+ * end-to-end. To remove:
+ *   1. Delete this file (api/send-email.ts).
+ *   2. Run `npm uninstall resend`.
+ *   3. Drop `sendVerificationEmailViaResend` / `sendPasswordResetEmailViaResend`
+ *      from src/lib/email.ts (and the `EMAIL_CONSOLE_ONLY` flag with them, since
+ *      its only consumer was sendViaApi).
+ *   4. Migrate the (currently dead) `sendPasswordResetEmail` path in
+ *      src/lib/verification.ts to Supabase's native reset flow if it's ever
+ *      revived — ForgotPasswordPage already uses supabase.auth.resetPasswordForEmail.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Resend } from 'resend';
