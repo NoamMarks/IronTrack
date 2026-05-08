@@ -12,11 +12,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Resend } from 'resend';
 
-// Must be a domain verified at resend.com/domains — otherwise Resend rejects
-// the send with a "domain not verified" error and /api/send-email returns
-// 502, which dumps the OTP to the browser console via the client-side
-// fallback. Update this string the same time you verify a new domain.
-const FROM_ADDRESS = 'IronTrack <noreply@irontrack.vercel.app>';
+// Resend's shared test sender. Accepted without domain verification but
+// only DELIVERS to the verified owner email of the Resend account
+// (resend.com/settings/emails); sends to any other recipient are rejected
+// with 422, /api/send-email returns 502, and the client-side fallback
+// prints the OTP to the browser console. Replace with
+// `noreply@<your verified domain>` once a real domain is verified at
+// resend.com/domains to enable arbitrary recipients.
+const FROM_ADDRESS = 'IronTrack <onboarding@resend.dev>';
 
 interface EmailPayload {
   to?: unknown;
