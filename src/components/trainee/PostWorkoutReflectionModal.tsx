@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Activity, Skull } from 'lucide-react';
-import { Modal } from '../ui';
+import { Modal, Button } from '../ui';
 import { cn } from '../../lib/utils';
 import { hapticTick } from '../../lib/haptics';
 
@@ -12,6 +12,14 @@ const DIFFICULTY_LABELS: Record<number, string> = {
   3: 'Solid',
   4: 'Brutal',
   5: 'Maxed',
+};
+
+const DIFFICULTY_ACTIVE: Record<number, string> = {
+  1: 'bg-accent/20 text-accent border-t-2 border-accent',
+  2: 'bg-accent/15 text-accent/80 border-t-2 border-accent/60',
+  3: 'bg-primary/20 text-primary border-t-2 border-primary',
+  4: 'bg-warning/20 text-warning border-t-2 border-warning',
+  5: 'bg-danger/20 text-danger border-t-2 border-danger',
 };
 
 interface PostWorkoutReflectionModalProps {
@@ -66,7 +74,7 @@ export function PostWorkoutReflectionModal({
             How did it feel?
           </p>
           {dayName && (
-            <p className="text-xl font-bold italic font-serif text-foreground mt-1 truncate">
+            <p className="text-xl font-display font-bold uppercase tracking-wide text-foreground mt-1 truncate">
               {dayName}
             </p>
           )}
@@ -93,11 +101,11 @@ export function PostWorkoutReflectionModal({
                   className={cn(
                     'flex flex-col items-center justify-center py-3 transition-colors',
                     active
-                      ? 'bg-foreground text-background'
-                      : 'bg-card text-muted-foreground hover:text-foreground',
+                      ? DIFFICULTY_ACTIVE[n]
+                      : 'bg-surface text-muted-foreground hover:text-primary',
                   )}
                 >
-                  <span className="text-lg font-bold tabular-nums leading-none">{n}</span>
+                  <span className="text-lg font-mono font-bold tabular-nums leading-none">{n}</span>
                   <span className="text-[9px] font-mono uppercase tracking-widest mt-1 opacity-80">
                     {DIFFICULTY_LABELS[n]}
                   </span>
@@ -128,7 +136,7 @@ export function PostWorkoutReflectionModal({
             placeholder="Bar speed felt heavy, knees tracked well, RPE 9 honest..."
             data-testid="reflection-note"
             rows={3}
-            className="w-full bg-muted/30 border border-border p-3 text-sm font-mono text-foreground outline-none focus:border-muted-foreground resize-none placeholder:text-muted-foreground/60"
+            className="w-full bg-surface border-b border-primary/30 p-3 text-sm font-mono text-foreground outline-none focus:border-primary resize-none placeholder:text-muted-foreground/60"
           />
           <p className="text-[9px] font-mono text-muted-foreground/60 text-right tabular-nums">
             {note.length} / {MAX_NOTE}
@@ -138,24 +146,24 @@ export function PostWorkoutReflectionModal({
         {/* Actions — Skip is first-class, Submit is gated on difficulty
             being chosen so the rating is always meaningful when present. */}
         <div className="flex gap-2">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            className="flex-1 py-3"
             onClick={onSkip}
             disabled={submitting}
             data-testid="reflection-skip-btn"
-            className="flex-1 py-3 text-xs font-bold uppercase tracking-widest border border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground transition-colors disabled:opacity-40"
           >
             Skip
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="primary"
+            className="flex-[2] py-3"
             onClick={() => void handleSubmit()}
             disabled={difficulty === null || submitting}
             data-testid="reflection-submit-btn"
-            className="btn-press flex-[2] py-3 text-xs font-bold uppercase tracking-widest bg-foreground text-background hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting ? 'Saving...' : 'Save Reflection'}
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>

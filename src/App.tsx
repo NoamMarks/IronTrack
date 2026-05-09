@@ -30,7 +30,8 @@ import { useProgramData } from './hooks/useProgramData';
 import { useDeepLinks } from './hooks/useDeepLinks';
 import { isNative } from './lib/platform';
 import { supabase } from './lib/supabase';
-import { TechnicalCard, TechnicalInput, Modal, Toast } from './components/ui';
+import { TechnicalCard, TechnicalInput, Modal, Toast, Button } from './components/ui';
+import { cn } from './lib/utils';
 import { AdminView } from './components/admin/AdminView';
 import { SuperadminView } from './components/admin/SuperadminView';
 import { ClientDashboard } from './components/trainee/ClientDashboard';
@@ -64,15 +65,15 @@ function getLastLoggedMs(client: Client): number | null {
   return best;
 }
 
-function getComplianceInfo(client: Client): { dotClass: string; label: string } {
+function getComplianceInfo(client: Client): { dotClass: string; label: string; status: 'green' | 'amber' | 'red' } {
   const lastMs = getLastLoggedMs(client);
-  if (lastMs === null) return { dotClass: 'bg-red-500', label: 'No sessions' };
+  if (lastMs === null) return { dotClass: 'bg-danger', label: 'No sessions', status: 'red' };
   const lastDate = new Date(lastMs);
   const days = differenceInDays(new Date(), lastDate);
   const label = days === 0 ? 'Today' : formatDistanceToNow(lastDate, { addSuffix: true });
-  if (days <= 3) return { dotClass: 'bg-green-500', label };
-  if (days <= 7) return { dotClass: 'bg-amber-500', label };
-  return { dotClass: 'bg-red-500', label };
+  if (days <= 3) return { dotClass: 'bg-accent', label, status: 'green' };
+  if (days <= 7) return { dotClass: 'bg-warning', label, status: 'amber' };
+  return { dotClass: 'bg-danger', label, status: 'red' };
 }
 
 function ClientListView({
@@ -85,77 +86,80 @@ function ClientListView({
   onAddClient: () => void;
 }) {
   const trainees = clients.filter((c) => c.role === 'trainee');
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   return (
     <div className="space-y-8">
       <header className="flex justify-between items-end">
         <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
-          <h1 className="text-5xl font-bold tracking-tighter uppercase italic font-serif text-foreground">
+          <h1 className="text-4xl font-display font-bold uppercase tracking-[0.1em] text-foreground">
             Clients
           </h1>
-          <p className="text-muted-foreground font-mono text-xs mt-1 uppercase tracking-widest">
+          <p className="text-muted-foreground font-mono text-xs mt-1 uppercase tracking-[0.2em]">
             Active Training Management
           </p>
         </motion.div>
-        <motion.button
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={onAddClient}
-          className="bg-foreground text-background px-6 py-3 text-xs font-bold uppercase tracking-widest flex items-center hover:opacity-90 transition-all shadow-lg"
-        >
-          <UserPlus className="w-4 h-4 mr-2" />
-          New Client
-        </motion.button>
+        <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+          <Button variant="primary" onClick={onAddClient}>+ New Client</Button>
+        </motion.div>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <AnimatePresence initial={false}>
-          {trainees.map((client, idx) => {
-            const compliance = getComplianceInfo(client);
-            return (
-              <motion.div
-                key={client.id}
-                layout
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ delay: idx * 0.04, duration: 0.25 }}
+      <motion.div
+        initial="hidden"
+        animate="visible"
+        variants={{ visible: { transition: { staggerChildren: 0.07 } } }}
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+      >
+        {trainees.map((client) => {
+          const compliance = getComplianceInfo(client);
+          return (
+            <motion.div
+              key={client.id}
+              variants={{ hidden: { opacity: 0, y: 16 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } }}
+            >
+              <div
+                onMouseEnter={() => setHoveredId(client.id)}
+                onMouseLeave={() => setHoveredId(null)}
               >
-                <TechnicalCard className="group cursor-pointer hover:border-muted-foreground transition-all hover:shadow-xl hover:-translate-y-1">
-                  <div onClick={() => onSelectClient(client)} className="p-8">
+                <TechnicalCard glow={hoveredId === client.id ? 'primary' : 'none'} className="transition-all">
+                  <div onClick={() => onSelectClient(client)} className="p-8 cursor-pointer">
                     <div className="flex justify-between items-start mb-6">
-                      <div className="w-12 h-12 bg-muted flex items-center justify-center rounded-sm group-hover:bg-foreground group-hover:text-background transition-colors">
+                      <div className="w-12 h-12 bg-muted flex items-center justify-center">
                         <Users className="w-6 h-6" />
                       </div>
                       <div className="flex items-center gap-2">
-                        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${compliance.dotClass}`} />
+                        {/* Compliance dot with ping ring for active clients */}
+                        <div className="relative flex items-center justify-center w-5 h-5">
+                          {compliance.status === 'green' && (
+                            <span className="absolute inline-flex w-full h-full rounded-full bg-accent/40 animate-ping" />
+                          )}
+                          <span className={cn('w-2.5 h-2.5 rounded-full relative', compliance.dotClass)} />
+                        </div>
                         <div className="text-right">
                           <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest">Last Trained</p>
                           <p className="text-[10px] text-foreground font-mono uppercase font-bold">{compliance.label}</p>
                         </div>
                       </div>
                     </div>
-                    <h3 className="text-2xl font-bold text-foreground mb-1 tracking-tight">{client.name}</h3>
+                    <h3 className="text-xl font-display font-semibold text-foreground mb-1 tracking-wide uppercase">{client.name}</h3>
                     <p className="text-xs text-muted-foreground font-mono mb-6">{client.email}</p>
                     <div className="border-t border-border pt-6 flex justify-between items-center">
                       <div>
                         <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest">Program</p>
-                        <p className="text-sm text-foreground font-mono font-medium">
+                        <p className="text-sm text-primary/80 font-mono font-medium">
                           {client.programs[0]?.name ?? 'No Program'}
                         </p>
                       </div>
-                      <div className="w-8 h-8 rounded-full border border-border flex items-center justify-center group-hover:bg-foreground group-hover:text-background transition-all">
+                      <div className="w-8 h-8 border border-primary/30 text-primary/50 flex items-center justify-center hover:border-primary hover:text-primary transition-all">
                         <ChevronRight className="w-4 h-4" />
                       </div>
                     </div>
                   </div>
                 </TechnicalCard>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-      </div>
+              </div>
+            </motion.div>
+          );
+        })}
+      </motion.div>
     </div>
   );
 }
@@ -296,42 +300,61 @@ function LandingPage({
             transition={{ duration: 0.5 }}
           >
             <div className="flex items-center gap-3 mb-6">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+              <span className="w-1.5 h-1.5 bg-accent rounded-full animate-fui-pulse" />
               <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
                 System Online / V1
               </span>
             </div>
-            <h1 className="text-7xl md:text-8xl font-bold tracking-tighter uppercase italic font-serif leading-[0.85] text-foreground">
-              Iron<br />Track
-            </h1>
-            <p className="text-muted-foreground font-mono text-xs mt-6 uppercase tracking-widest">
+            <motion.h1
+              initial="hidden"
+              animate="visible"
+              variants={{ visible: { transition: { staggerChildren: 0.12 } } }}
+              className="text-7xl lg:text-9xl font-display font-bold uppercase leading-none"
+            >
+              {['IRON', 'TRACK'].map((word) => (
+                <motion.span
+                  key={word}
+                  variants={{
+                    hidden: { opacity: 0, y: 40 },
+                    visible: { opacity: 1, y: 0, transition: { duration: 0.7, ease: [0.16, 1, 0.3, 1] } },
+                  }}
+                  className="block text-foreground"
+                >
+                  {word}
+                </motion.span>
+              ))}
+            </motion.h1>
+            <motion.div
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              transition={{ delay: 0.4, duration: 0.6, ease: 'easeOut' }}
+              className="h-px w-24 bg-primary mt-6 mb-8 origin-left"
+            />
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5, duration: 0.6 }}
+              className="text-sm font-mono uppercase tracking-[0.2em] text-muted-foreground"
+            >
               Unified Training Management System
-            </p>
+            </motion.p>
             <p className="text-foreground/80 mt-6 max-w-md leading-relaxed">
               The brutalist toolkit for serious coaches and athletes. Build periodized programs,
               log every set, and watch progress emerge from the data — no fluff, no fitness theatre.
             </p>
-            <div className="mt-10 flex flex-wrap gap-3">
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={openLogin}
-                data-testid="hero-login-btn"
-                className="bg-foreground text-background px-7 py-4 text-xs font-bold uppercase tracking-widest flex items-center hover:opacity-90 shadow-lg"
-              >
-                <LogIn className="w-4 h-4 mr-2" />
-                Enter System
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={onSignup}
-                className="bg-background border border-border hover:border-foreground text-foreground px-7 py-4 text-xs font-bold uppercase tracking-widest flex items-center transition-colors"
-              >
-                <UserPlus className="w-4 h-4 mr-2" />
-                Sign Up
-              </motion.button>
-            </div>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.65, duration: 0.5 }}
+              className="flex gap-4 flex-wrap mt-10"
+            >
+              <Button variant="primary" size="md" onClick={openLogin} data-testid="hero-login-btn">
+                Coach Login
+              </Button>
+              <Button variant="ghost" size="md" onClick={onSignup}>
+                Trainee Signup
+              </Button>
+            </motion.div>
           </motion.div>
 
           <motion.div
@@ -494,7 +517,12 @@ function LandingPage({
             <Calculator className="hidden md:block w-12 h-12 text-foreground/30" />
           </motion.div>
 
-          <div className="grid lg:grid-cols-3 gap-5">
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={{ visible: { transition: { staggerChildren: 0.08, delayChildren: 0.8 } } }}
+            className="grid lg:grid-cols-3 gap-5"
+          >
             {[
               { label: 'Plate Calculator', icon: Calculator, body: <PlateCalculator isInline /> },
               { label: 'RPE → 1RM',        icon: Gauge,      body: <RPECalculator />            },
@@ -502,10 +530,7 @@ function LandingPage({
             ].map((tool, i) => (
               <motion.div
                 key={tool.label}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.06, duration: 0.3 }}
+                variants={{ hidden: { opacity: 0, y: 24 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5 } } }}
               >
                 <TechnicalCard className="h-full">
                   <div className="border-b border-border bg-muted/30 px-5 py-3 flex items-center justify-between">
@@ -523,7 +548,7 @@ function LandingPage({
                 </TechnicalCard>
               </motion.div>
             ))}
-          </div>
+          </motion.div>
 
           {/* Conversion CTA — placed directly under the tools so the user
               hits it the moment they finish playing with one. */}

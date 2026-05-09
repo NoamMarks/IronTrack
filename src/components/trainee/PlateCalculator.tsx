@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Modal } from '../ui';
+import { Modal, Button } from '../ui';
 import { cn } from '../../lib/utils';
 import { calculatePlates, getPlateColor, getPlateWidth } from '../../lib/plateCalculator';
 import {
@@ -73,7 +73,7 @@ export function PlateCalculator({
                 <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
                   {label}
                 </label>
-                <div className="bg-muted/30 p-3 border border-border">
+                <div className="bg-surface p-3 border-b border-border">
                   <input
                     type="text"
                     inputMode="decimal"
@@ -99,7 +99,7 @@ export function PlateCalculator({
         {/* Barbell visualization — overflow-x-auto prevents huge weights from
             bleeding outside the modal padding */}
         <div
-          className="bg-muted/20 border border-border p-6 rounded-sm overflow-x-auto no-scrollbar"
+          className="bg-surface border border-border/50 p-6 rounded-sm overflow-x-auto no-scrollbar"
           data-testid="barbell-visual"
         >
           <div className="flex items-center justify-center gap-0.5 min-w-max">
@@ -164,7 +164,7 @@ export function PlateCalculator({
         </div>
 
         {result.remainder > 0 && (
-          <p className="text-[10px] font-mono text-amber-500">
+          <p className="text-[10px] font-mono text-warning">
             Cannot exactly load {target}kg — closest is {result.totalWeight}kg ({result.remainder}kg off)
           </p>
         )}
@@ -173,19 +173,15 @@ export function PlateCalculator({
             Emits the COMMIT-clamped value so a downstream input never receives
             a partial-typing string like "8." or anything > 1000 kg. */}
         {onApply && (
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            className="w-full py-3"
             onClick={() => onApply(clampOnCommit(targetInput, 'load'))}
             data-testid="plate-apply-btn"
             disabled={parseNumericKind(targetInput, 'load') === null}
-            className={cn(
-              'btn-press w-full py-3 text-xs font-bold uppercase tracking-widest rounded-input',
-              'bg-accent text-accent-foreground hover:opacity-90',
-              'disabled:opacity-40 disabled:cursor-not-allowed'
-            )}
           >
-            Apply Weight
-          </button>
+            Apply to Set
+          </Button>
         )}
       </div>
   );

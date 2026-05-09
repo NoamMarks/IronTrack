@@ -151,16 +151,16 @@ export function RestTimer() {
       <motion.button
         onClick={() => setIsExpanded(!isExpanded)}
         className={cn(
-          'fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-colors',
+          'fixed bottom-6 right-6 z-50 w-14 h-14 flex items-center justify-center shadow-2xl transition-all',
           isRunning
-            ? 'bg-green-600 text-white animate-pulse'
-            : 'bg-foreground text-background hover:opacity-90'
+            ? 'bg-accent/15 text-accent border border-accent animate-fui-pulse'
+            : 'bg-surface border border-primary text-primary hover:bg-primary/10 hover:shadow-glow-primary'
         )}
         whileTap={{ scale: 0.9 }}
         data-testid="rest-timer-fab"
       >
         {isRunning ? (
-          <span className="text-xs font-bold font-mono">{display}</span>
+          <span className="text-xs font-bold font-mono text-accent">{display}</span>
         ) : (
           <Mic className="w-5 h-5" />
         )}
@@ -173,7 +173,7 @@ export function RestTimer() {
             initial={{ opacity: 0, y: 40, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 40, scale: 0.9 }}
-            className="fixed bottom-24 right-6 z-50 w-72 bg-card border border-border shadow-2xl rounded-sm p-6 space-y-5"
+            className="fixed bottom-24 right-6 z-50 w-72 bg-card border border-primary/30 shadow-[0_0_40px_rgba(0,212,255,0.08)] p-6 space-y-5"
             data-testid="rest-timer-panel"
           >
             {/* Close */}
@@ -188,7 +188,14 @@ export function RestTimer() {
 
             {/* Countdown display */}
             <div className="text-center">
-              <p className="text-5xl font-bold font-mono tracking-tighter" data-testid="timer-display">
+              <p
+                className={cn(
+                  'text-5xl font-bold font-mono tracking-tighter',
+                  isRunning ? 'text-primary' : 'text-foreground',
+                  isRunning ? '[text-shadow:0_0_20px_rgba(0,212,255,0.6)]' : '',
+                )}
+                data-testid="timer-display"
+              >
                 {display}
               </p>
             </div>
@@ -197,7 +204,7 @@ export function RestTimer() {
             <div className="flex justify-center gap-4">
               <button
                 onClick={() => setRemaining((r) => Math.max(0, r - 15))}
-                className="w-10 h-10 border border-border rounded-sm flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-muted-foreground transition-colors"
+                className="w-10 h-10 border border-border/50 flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/60 transition-colors"
               >
                 <Minus className="w-4 h-4" />
               </button>
@@ -209,8 +216,8 @@ export function RestTimer() {
                 className={cn(
                   'px-6 py-2 text-xs font-bold uppercase tracking-widest transition-all',
                   isRunning
-                    ? 'bg-red-600 text-white hover:bg-red-500'
-                    : 'bg-foreground text-background hover:opacity-90'
+                    ? 'border border-danger text-danger bg-danger/10 hover:bg-danger/20'
+                    : 'border border-primary text-primary bg-primary/10 hover:bg-primary/20'
                 )}
                 data-testid="timer-start-stop"
               >
@@ -218,7 +225,7 @@ export function RestTimer() {
               </button>
               <button
                 onClick={() => setRemaining((r) => r + 15)}
-                className="w-10 h-10 border border-border rounded-sm flex items-center justify-center text-muted-foreground hover:text-foreground hover:border-muted-foreground transition-colors"
+                className="w-10 h-10 border border-border/50 flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/60 transition-colors"
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -231,7 +238,7 @@ export function RestTimer() {
                   key={s}
                   onClick={() => startTimer(s)}
                   data-testid={`preset-${s}`}
-                  className="py-2 text-[10px] font-mono uppercase border border-border hover:bg-foreground hover:text-background transition-all"
+                  className="py-2 text-[10px] font-mono uppercase border border-border/50 text-muted-foreground hover:border-primary hover:text-primary transition-all"
                 >
                   {s >= 60 ? `${s / 60}m` : `${s}s`}
                 </button>
@@ -246,8 +253,8 @@ export function RestTimer() {
                 className={cn(
                   'w-full py-3 text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 border transition-all',
                   isListening
-                    ? 'bg-red-600 text-white border-red-600 animate-pulse'
-                    : 'border-border hover:border-muted-foreground text-muted-foreground hover:text-foreground'
+                    ? 'border border-danger text-danger bg-danger/10 animate-fui-pulse'
+                    : 'border-border/50 text-muted-foreground hover:border-primary hover:text-primary'
                 )}
               >
                 {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
@@ -263,7 +270,7 @@ export function RestTimer() {
             )}
             {voiceError && (
               <p
-                className="text-[10px] font-mono text-amber-500 text-center"
+                className="text-[10px] font-mono text-warning text-center"
                 data-testid="voice-error"
               >
                 {voiceError}

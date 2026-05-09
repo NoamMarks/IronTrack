@@ -3,6 +3,7 @@ import { Activity, MessageSquare, Radio, Pencil, X, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../lib/supabase';
 import { useRecentActivity, type ActivityEntry } from '../../hooks/useRecentActivity';
+import { Button } from '../ui';
 import { cn } from '../../lib/utils';
 
 const MAX_COACH_NOTE = 300;
@@ -63,16 +64,16 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
   return (
     <aside
       data-testid="recent-activity-panel"
-      className={cn('flex flex-col bg-card border border-border rounded-card overflow-hidden', className)}
+      className={cn('flex flex-col bg-card border border-border border-t-2 border-t-primary/40 overflow-hidden', className)}
     >
-      <header className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+      <header className="flex items-center justify-between px-4 py-3 border-b border-primary/20 bg-surface/60">
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 text-foreground" />
           <h2 className="text-[11px] font-mono font-bold uppercase tracking-widest text-foreground">
             Recent Activity
           </h2>
         </div>
-        <div className="flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-widest text-emerald-400">
+        <div className="flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-widest text-accent">
           <Radio className="w-3 h-3 animate-pulse" />
           Live
         </div>
@@ -94,10 +95,10 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
                 <motion.li
                   key={entry.dayId}
                   layout
-                  initial={{ opacity: 0, x: 12 }}
+                  initial={{ opacity: 0, x: 24 }}
                   animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -12 }}
-                  transition={{ duration: 0.22 }}
+                  exit={{ opacity: 0, x: -24 }}
+                  transition={{ duration: 0.3, ease: 'easeOut' }}
                   data-testid={`activity-entry-${entry.dayId}`}
                   className="px-4 py-3 transition-colors"
                 >
@@ -128,8 +129,8 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
                   {!isExpanded && (
                     <div className="mt-2">
                       {entry.coachNote ? (
-                        <div className="flex items-start gap-1.5 border-l-2 border-foreground/20 pl-2">
-                          <p className="text-[10px] font-mono text-foreground/80 leading-relaxed flex-1 break-words">
+                        <div className="flex items-start gap-1.5 border-l-2 border-primary/40 pl-2">
+                          <p className="text-[10px] font-mono text-primary/70 leading-relaxed flex-1 break-words">
                             {entry.coachNote}
                           </p>
                           <button
@@ -137,7 +138,7 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
                             onClick={() => openFeedback(entry)}
                             aria-label="Edit feedback"
                             data-testid={`edit-feedback-btn-${entry.dayId}`}
-                            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                            className="shrink-0 text-muted-foreground hover:text-primary transition-colors"
                           >
                             <Pencil className="w-3 h-3" />
                           </button>
@@ -148,7 +149,7 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
                           onClick={() => openFeedback(entry)}
                           aria-label="Add feedback"
                           data-testid={`add-feedback-btn-${entry.dayId}`}
-                          className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+                          className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors"
                         >
                           <MessageSquare className="w-3 h-3" />
                           Add feedback
@@ -179,7 +180,7 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
                           maxLength={MAX_COACH_NOTE}
                           placeholder="Short feedback for the trainee…"
                           data-testid={`feedback-textarea-${entry.dayId}`}
-                          className="w-full bg-muted/20 border border-border text-[11px] font-mono text-foreground px-2 py-1.5 outline-none focus:border-muted-foreground resize-none placeholder:text-muted-foreground/60"
+                          className="w-full bg-surface border-b border-primary/30 focus:border-primary text-[11px] font-mono text-foreground px-2 py-1.5 outline-none resize-none placeholder:text-muted-foreground/60"
                         />
                         <div className="flex items-center justify-between mt-1">
                           <span className="text-[9px] font-mono text-muted-foreground/60 tabular-nums">
@@ -195,17 +196,18 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
                             >
                               <X className="w-3.5 h-3.5" />
                             </button>
-                            <button
+                            <Button
+                              variant="primary"
+                              size="sm"
                               type="button"
                               onClick={() => void saveFeedback(entry.dayId, draft)}
                               disabled={isSaving}
                               aria-label="Save feedback"
                               data-testid={`save-feedback-btn-${entry.dayId}`}
-                              className="flex items-center gap-1 px-2 py-1 bg-foreground text-background text-[9px] font-mono uppercase tracking-widest hover:opacity-90 disabled:opacity-40 transition-opacity"
                             >
                               <Check className="w-3 h-3" />
                               {isSaving ? 'Saving' : 'Save'}
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       </motion.div>
@@ -224,10 +226,10 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
 function DifficultyPill({ difficulty }: { difficulty: number | null }) {
   const tone = useMemo(() => {
     if (difficulty == null) return null;
-    if (difficulty <= 2) return { color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10', label: 'Easy' };
-    if (difficulty === 3) return { color: 'text-sky-400 border-sky-500/30 bg-sky-500/10', label: 'Solid' };
-    if (difficulty === 4) return { color: 'text-amber-400 border-amber-500/30 bg-amber-500/10', label: 'Brutal' };
-    return { color: 'text-red-400 border-red-500/30 bg-red-500/10', label: 'Maxed' };
+    if (difficulty <= 2) return { color: 'text-accent border-accent/30 bg-accent/10', label: 'Easy' };
+    if (difficulty === 3) return { color: 'text-primary border-primary/30 bg-primary/10', label: 'Solid' };
+    if (difficulty === 4) return { color: 'text-warning border-warning/30 bg-warning/10', label: 'Brutal' };
+    return { color: 'text-danger border-danger/30 bg-danger/10', label: 'Maxed' };
   }, [difficulty]);
 
   if (!tone || difficulty == null) return null;
@@ -255,7 +257,9 @@ function LoadingState() {
 function EmptyState() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 text-center">
-      <Activity className="w-8 h-8 text-muted-foreground mb-3" />
+      <div className="w-12 h-12 border border-border/50 flex items-center justify-center mb-3">
+        <Activity className="w-5 h-5 text-muted-foreground" />
+      </div>
       <p className="text-xs font-mono text-foreground uppercase tracking-widest">
         No reflections yet
       </p>

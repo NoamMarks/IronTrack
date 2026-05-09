@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Edit3, Trash2, X, BookmarkPlus, ChevronUp, ChevronDown } from 'lucide-react';
-import { TechnicalCard, TechnicalInput } from '../ui';
+import { TechnicalCard, TechnicalInput, Button } from '../ui';
 import { ColumnModal } from './ColumnModal';
 import { SaveTemplateModal } from './SaveTemplateModal';
 import { ExerciseCombobox } from './ExerciseCombobox';
@@ -399,30 +399,23 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
           )}
         </div>
         <div className="flex space-x-3">
-          <button
-            onClick={openAddColumn}
-            data-testid="add-column-btn"
-            className="border border-foreground text-foreground px-6 py-3 text-xs font-bold uppercase tracking-widest hover:bg-foreground hover:text-background transition-all shadow-sm"
-          >
-            + Add Column
-          </button>
-          <button
-            onClick={addWeek}
-            className="bg-foreground text-background px-6 py-3 text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all shadow-md"
-          >
-            + Add Week
-          </button>
+          <Button variant="ghost" size="sm" onClick={openAddColumn} data-testid="add-column-btn">
+            + Column
+          </Button>
+          <Button variant="primary" size="sm" onClick={addWeek}>
+            + Week
+          </Button>
         </div>
       </div>
 
       {/* Weeks */}
       <div className="space-y-8">
         {program.weeks.map((week) => (
-          <TechnicalCard key={week.id} className="p-8 border-2">
+          <TechnicalCard key={week.id} className="p-8">
             {/* Week header */}
             <div className="flex justify-between items-center mb-8 border-b border-border pb-6">
               <div className="flex items-center space-x-4">
-                <h3 className="text-2xl font-bold font-mono tracking-tighter">
+                <h3 className="text-sm font-mono font-bold uppercase tracking-[0.25em] text-primary">
                   WEEK {week.weekNumber}
                 </h3>
                 <button
@@ -432,39 +425,36 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
                   <Trash2 className="w-5 h-5" />
                 </button>
               </div>
-              <button
-                onClick={() => addDay(week.id)}
-                className="text-xs font-bold uppercase tracking-widest border border-foreground px-4 py-2 hover:bg-foreground hover:text-background transition-all"
-              >
-                + Add Day
-              </button>
+              <Button variant="ghost" size="sm" onClick={() => addDay(week.id)}>
+                + Day
+              </Button>
             </div>
 
             {/* Days */}
             <div className="space-y-12">
               {week.days.map((day) => (
-                <div key={day.id} className="space-y-6 bg-muted/10 p-6 rounded-sm border border-border/50">
+                <div key={day.id} className="space-y-6 bg-surface/30 p-6 border border-border/40">
                   {/* Day header */}
                   <div className="flex justify-between items-center">
                     <div className="flex items-center space-x-4">
                       <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
                         Day {day.dayNumber}
+                        {day.loggedAt && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block ml-2" title="Session logged" />
+                        )}
                       </span>
                       <input
                         value={day.name}
                         onChange={(e) => updateDayName(day.dayNumber, e.target.value)}
                         maxLength={150}
                         title={day.name}
-                        className="bg-transparent border-none outline-none text-2xl font-bold italic font-serif text-foreground focus:ring-0 p-0 w-64 overflow-hidden text-ellipsis whitespace-nowrap"
+                        className="bg-transparent border-none outline-none text-base font-display font-semibold uppercase tracking-widest text-foreground focus:ring-0 p-0 w-64 overflow-hidden text-ellipsis whitespace-nowrap"
                       />
                     </div>
                     <div className="flex items-center space-x-4">
-                      <button
-                        onClick={() => addExercise(week.id, day.id)}
-                        className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground underline underline-offset-4"
-                      >
-                        + Add Exercise
-                      </button>
+                      <Button variant="ghost" size="sm" onClick={() => addExercise(week.id, day.id)}>
+                        + Exercise
+                      </Button>
                       <button
                         onClick={() => deleteDay(week.id, day.id)}
                         className="text-muted-foreground hover:text-red-500"
@@ -489,24 +479,24 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
                             key={col.id}
                             className="text-center group relative flex items-center justify-center min-h-[32px]"
                           >
-                            <span className={cn(col.type === 'actual' ? 'text-blue-400/70' : '')}>
+                            <span className={cn(col.type === 'actual' ? 'text-primary/60' : '')}>
                               {col.label}
                               {col.type === 'actual' && (
-                                <span className="ml-1 text-[8px] opacity-50">(ACT)</span>
+                                <span className="ml-1 text-[8px] text-primary/40">(ACT)</span>
                               )}
                             </span>
                             {/* Edit/delete column controls */}
                             <div className="absolute -top-6 left-1/2 -translate-x-1/2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
                               <button
                                 onClick={() => openEditColumn(col)}
-                                className="text-blue-500 bg-background rounded-full p-1.5 shadow-md hover:bg-blue-50 border border-blue-100"
+                                className="text-primary bg-surface rounded-full p-1.5 shadow-md hover:bg-primary/10 border border-primary/20"
                                 title="Edit Column"
                               >
                                 <Edit3 className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 onClick={() => deleteColumn(col.id)}
-                                className="text-red-500 bg-background rounded-full p-1.5 shadow-md hover:bg-red-50 border border-red-100"
+                                className="text-danger bg-surface rounded-full p-1.5 shadow-md hover:bg-danger/10 border border-danger/20"
                                 title="Delete Column"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -522,7 +512,7 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
                         {day.exercises.map((ex, exIdx) => (
                           <div
                             key={ex.id}
-                            className="grid gap-4 items-center bg-card p-3 border border-border hover:border-muted-foreground transition-all group shadow-sm"
+                            className="grid gap-4 items-center bg-card/50 p-3 border border-border hover:border-primary/40 transition-all group"
                             style={{ gridTemplateColumns: gridTemplate }}
                           >
                             {/* Reorder buttons — per-day-per-week, not synced across weeks */}
@@ -531,7 +521,7 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
                                 type="button"
                                 onClick={() => reorderExercise(week.id, day.id, exIdx, exIdx - 1)}
                                 disabled={exIdx === 0}
-                                className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                                className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
                               >
                                 <ChevronUp className="w-5 h-5" />
                               </button>
@@ -539,7 +529,7 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
                                 type="button"
                                 onClick={() => reorderExercise(week.id, day.id, exIdx, exIdx + 1)}
                                 disabled={exIdx === day.exercises.length - 1}
-                                className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                                className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
                               >
                                 <ChevronDown className="w-5 h-5" />
                               </button>

@@ -9,12 +9,12 @@ interface WorkoutHistoryModalProps {
   onClose: () => void;
 }
 
-const DIFFICULTY_LABELS: Record<number, string> = {
-  1: 'Trivial',
-  2: 'Easy',
-  3: 'Solid',
-  4: 'Brutal',
-  5: 'Maxed Out',
+const BADGE_STYLES: Record<number, { bg: string; text: string; label: string }> = {
+  1: { bg: 'bg-accent/15 border-accent/30',   text: 'text-accent',    label: 'Trivial' },
+  2: { bg: 'bg-accent/10 border-accent/20',   text: 'text-accent/80', label: 'Easy'    },
+  3: { bg: 'bg-primary/15 border-primary/30', text: 'text-primary',   label: 'Solid'   },
+  4: { bg: 'bg-warning/15 border-warning/30', text: 'text-warning',   label: 'Brutal'  },
+  5: { bg: 'bg-danger/15 border-danger/30',   text: 'text-danger',    label: 'Maxed'   },
 };
 
 /** Build the prescribed summary string for an exercise row.
@@ -49,7 +49,7 @@ export function WorkoutHistoryModal({ day, program, onClose }: WorkoutHistoryMod
     <Modal isOpen title={day.name} onClose={onClose}>
       {/* The inner content is capped in height and scrolls so long sessions
           with many exercises don't overflow the viewport. */}
-      <div className="space-y-6 max-h-[65vh] overflow-y-auto pr-1">
+      <div className="space-y-6 divide-y divide-primary/10 max-h-[65vh] overflow-y-auto pr-1">
         {/* Date stamp */}
         {formattedDate && (
           <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground -mt-2">
@@ -76,8 +76,8 @@ export function WorkoutHistoryModal({ day, program, onClose }: WorkoutHistoryMod
 
         {/* Reflection section */}
         {hasReflection && (
-          <section className="border-t border-border pt-4 space-y-2">
-            <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+          <section className="border-t border-primary/20 pt-4 space-y-2">
+            <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
               Post-Workout Reflection
             </p>
             {day.difficulty != null && (
@@ -89,7 +89,7 @@ export function WorkoutHistoryModal({ day, program, onClose }: WorkoutHistoryMod
               </div>
             )}
             {day.reflectionNote && (
-              <p className="text-sm font-mono text-foreground/85 leading-relaxed whitespace-pre-wrap">
+              <p className="text-sm font-mono text-foreground/90 leading-relaxed whitespace-pre-wrap">
                 {day.reflectionNote}
               </p>
             )}
@@ -98,13 +98,15 @@ export function WorkoutHistoryModal({ day, program, onClose }: WorkoutHistoryMod
 
         {/* Coach feedback */}
         {day.coachNote && (
-          <section className="border-t border-border pt-4 space-y-2">
-            <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+          <section className="border-t border-primary/20 pt-4 space-y-2">
+            <p className="text-[10px] font-mono uppercase tracking-widest text-primary/60">
               Coach Feedback
             </p>
-            <p className="text-sm font-mono text-foreground leading-relaxed whitespace-pre-wrap">
-              {day.coachNote}
-            </p>
+            <div className="border-l-2 border-primary/40 pl-3">
+              <p className="text-sm font-mono text-foreground leading-relaxed whitespace-pre-wrap">
+                {day.coachNote}
+              </p>
+            </div>
           </section>
         )}
       </div>
@@ -130,20 +132,20 @@ function ExerciseBlock({
   return (
     <div className="border border-border">
       {/* Exercise name header */}
-      <div className="px-3 py-2 bg-muted/30 border-b border-border">
-        <span className="text-sm font-bold font-mono text-foreground">
+      <div className="px-3 py-2 bg-surface/60 border-b border-primary/20">
+        <span className="font-display font-semibold uppercase tracking-wide text-foreground">
           {ex.exerciseName}
         </span>
       </div>
 
-      <div className="divide-y divide-border/50">
+      <div className="divide-y divide-primary/15">
         {/* Prescribed */}
         <DataRow label="Prescribed" value={prescribedSummary(ex)} />
 
         {/* Actuals — always show, falling back to — */}
-        <div className="grid grid-cols-2 divide-x divide-border/50">
-          <DataRow label="Load" value={ex.actualLoad || '—'} />
-          <DataRow label="RPE" value={ex.actualRpe || '—'} />
+        <div className="grid grid-cols-2 divide-x divide-primary/15">
+          <DataRow label="Load" value={ex.actualLoad || '—'} highlight={!!ex.actualLoad} />
+          <DataRow label="RPE" value={ex.actualRpe || '—'} highlight={!!ex.actualRpe} />
         </div>
 
         {/* Notes — omit entirely when empty */}
@@ -158,32 +160,34 @@ function ExerciseBlock({
   );
 }
 
-function DataRow({ label, value }: { label: string; value: string }) {
+function DataRow({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  const isEmpty = value === '—';
   return (
-    <div className="flex gap-3 px-3 py-1.5">
+    <div className="flex gap-3 px-3 py-1.5 border-b border-border/20 last:border-0">
       <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground shrink-0 w-20">
         {label}
       </span>
-      <span className="text-xs font-mono text-foreground break-words">{value}</span>
+      <span className={cn(
+        'text-xs font-mono break-words',
+        isEmpty ? 'text-muted-foreground/40' : highlight ? 'text-primary' : 'text-foreground/80',
+      )}>
+        {value}
+      </span>
     </div>
   );
 }
 
 function DifficultyBadge({ value }: { value: number }) {
-  const label = DIFFICULTY_LABELS[value] ?? String(value);
-  const tone =
-    value <= 2 ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
-    : value === 3 ? 'text-sky-400 border-sky-500/30 bg-sky-500/10'
-    : value === 4 ? 'text-amber-400 border-amber-500/30 bg-amber-500/10'
-    :               'text-red-400 border-red-500/30 bg-red-500/10';
+  const style = BADGE_STYLES[value] ?? { bg: 'bg-muted border-border', text: 'text-muted-foreground', label: String(value) };
   return (
     <span
       className={cn(
         'inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-widest border',
-        tone,
+        style.bg,
+        style.text,
       )}
     >
-      {value} · {label}
+      {value} · {style.label}
     </span>
   );
 }

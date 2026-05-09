@@ -3,41 +3,62 @@
 @tailwind utilities;
 
 /* ──────────────────────────────────────────────────────────────────────────
- * IronTrack Design System (v0.3 — premium dark)
+ * IronTrack Design System — FUI (Futuristic UI) edition
  *
- *   Palette:  zinc-950 → zinc-900 → zinc-800   (background → card → border)
- *   Accent:   emerald-400 (#34d399)            (primary actions, success, focus rings)
- *   Radii:    --radius-card  : 0.75rem (rounded-xl)
- *             --radius-input : 0.5rem  (rounded-lg)
+ *   Palette:  deep navy → surface blue → cyan primary
+ *   Accent:   neon green (#00FF88)
+ *   Radii:    --radius-card  : 0px (sharp edges)
+ *             --radius-input : 0px
  * ────────────────────────────────────────────────────────────────────────── */
 
 :root {
-  --color-background: #09090b;        /* zinc-950 */
-  --color-foreground: #fafafa;        /* zinc-50  */
-  --color-card: #18181b;              /* zinc-900 */
-  --color-border: #27272a;            /* zinc-800 */
-  --color-muted: #18181b;             /* zinc-900 */
-  --color-muted-foreground: #a1a1aa;  /* zinc-400 — bumped from #737373 for AA contrast */
-  --color-accent: #34d399;            /* emerald-400 */
-  --color-accent-foreground: #052e1a; /* emerald-950-ish */
-  /* Pre-blended field background (cannot use Tailwind opacity modifiers inside
-     @apply when colors are defined as CSS variables). */
-  --color-field: rgb(39 39 42 / 0.30);
+  --color-background:        #020408;
+  --color-foreground:        #E2F4FF;
+  --color-surface:           #0A1628;
+  --color-card:              #0A1628;
+  --color-border:            #1A3A5C;
+  --color-muted:             #0A1628;
+  --color-muted-foreground:  #4A7A9B;
+  --color-primary:           #00D4FF;
+  --color-primary-foreground:#020408;
+  --color-accent:            #00FF88;
+  --color-accent-foreground: #020408;
+  --color-warning:           #FFB300;
+  --color-danger:            #FF3B5C;
+  --color-field:             rgba(10, 22, 40, 0.8);
 
-  --radius-card: 0.75rem;
-  --radius-input: 0.5rem;
+  --glow-primary:  0 0 20px rgba(0, 212, 255, 0.35);
+  --glow-accent:   0 0 20px rgba(0, 255, 136, 0.35);
+  --glow-danger:   0 0 20px rgba(255, 59, 92, 0.35);
+  --glow-warning:  0 0 20px rgba(255, 179, 0, 0.35);
+
+  --radius-card:  0px;
+  --radius-input: 0px;
 }
 
 .light {
-  --color-background: #fafafa;
-  --color-foreground: #09090b;
-  --color-card: #ffffff;
-  --color-border: #e4e4e7;
-  --color-muted: #f4f4f5;
-  --color-muted-foreground: #52525b;
-  --color-accent: #059669;            /* emerald-600 — readable on light bg */
-  --color-accent-foreground: #ffffff;
-  --color-field: rgb(244 244 245 / 0.6);
+  --color-background:        #EDF4FA;
+  --color-foreground:        #0A1628;
+  --color-surface:           #FFFFFF;
+  --color-card:              #FFFFFF;
+  --color-border:            #B0CCE0;
+  --color-muted:             #F0F6FA;
+  --color-muted-foreground:  #4A7A9B;
+  --color-primary:           #0077AA;
+  --color-primary-foreground:#FFFFFF;
+  --color-accent:            #00875A;
+  --color-accent-foreground: #FFFFFF;
+  --color-warning:           #B45300;
+  --color-danger:            #CC1133;
+  --color-field:             rgba(240, 246, 250, 0.9);
+
+  --glow-primary:  none;
+  --glow-accent:   none;
+  --glow-danger:   none;
+  --glow-warning:  none;
+
+  --radius-card:  0px;
+  --radius-input: 0px;
 }
 
 @layer components {
@@ -59,40 +80,36 @@
 }
 
 @layer base {
-  /*
-   * IronTrack atmosphere — powerlifting gym backdrop.
-   *
-   *   1. radial(top, crimson)   — competition-platform spotlight glow
-   *   2. radial(bottom-right, amber) — iron-on-iron heat / sweat warmth
-   *   3. radial(bottom-left, steel-blue) — cold steel undertone
-   *   4. SVG tile (barbell + 2 weight plates) repeated, ~3.5% opacity
-   *
-   * All four layers are fixed-attachment so they parallax behind scrolling
-   * content. The .light override below swaps to a lighter palette + darker
-   * stroke so the same atmosphere reads on a white theme.
-   */
   body {
     @apply bg-background text-foreground font-sans antialiased;
     background-image:
-      radial-gradient(ellipse 90% 55% at 50% -5%, rgba(220, 38, 38, 0.28) 0%, transparent 60%),
-      radial-gradient(ellipse 65% 60% at 110% 100%, rgba(245, 158, 11, 0.18) 0%, transparent 55%),
-      radial-gradient(ellipse 70% 60% at -10% 90%, rgba(56, 189, 248, 0.12) 0%, transparent 55%),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180' fill='none' stroke='%23ffffff' stroke-opacity='0.085' stroke-width='1.4'%3E%3Cg%3E%3Crect x='40' y='84' width='100' height='4' rx='1.5'/%3E%3Crect x='32' y='74' width='6' height='24' rx='1'/%3E%3Crect x='24' y='79' width='4' height='14' rx='1'/%3E%3Crect x='142' y='74' width='6' height='24' rx='1'/%3E%3Crect x='152' y='79' width='4' height='14' rx='1'/%3E%3C/g%3E%3Ccircle cx='30' cy='30' r='14'/%3E%3Ccircle cx='30' cy='30' r='4'/%3E%3Ccircle cx='150' cy='150' r='11'/%3E%3Ccircle cx='150' cy='150' r='3.5'/%3E%3C/svg%3E");
-    background-attachment: fixed, fixed, fixed, fixed;
-    background-repeat: no-repeat, no-repeat, no-repeat, repeat;
-    background-size: 100% 100%, 100% 100%, 100% 100%, 180px 180px;
-    background-position: center, center, center, center;
+      radial-gradient(ellipse 70% 40% at 50% 0%, rgba(0, 212, 255, 0.07) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 30% at 80% 100%, rgba(0, 212, 255, 0.04) 0%, transparent 60%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='1' cy='1' r='1' fill='rgba(0,212,255,0.12)'/%3E%3C/svg%3E");
+    background-attachment: fixed, fixed, fixed;
+    background-repeat: no-repeat, no-repeat, repeat;
+    background-size: 100% 100%, 100% 100%, 40px 40px;
   }
 
-  /* Light theme: same composition with lighter accent tints + a darker
-     stroke on the plate/barbell tile so the texture stays visible. */
-  .light body {
-    background-image:
-      radial-gradient(ellipse 90% 55% at 50% -5%, rgba(220, 38, 38, 0.18) 0%, transparent 60%),
-      radial-gradient(ellipse 65% 60% at 110% 100%, rgba(245, 158, 11, 0.18) 0%, transparent 55%),
-      radial-gradient(ellipse 70% 60% at -10% 90%, rgba(56, 189, 248, 0.10) 0%, transparent 55%),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180' fill='none' stroke='%23000000' stroke-opacity='0.10' stroke-width='1.4'%3E%3Cg%3E%3Crect x='40' y='84' width='100' height='4' rx='1.5'/%3E%3Crect x='32' y='74' width='6' height='24' rx='1'/%3E%3Crect x='24' y='79' width='4' height='14' rx='1'/%3E%3Crect x='142' y='74' width='6' height='24' rx='1'/%3E%3Crect x='152' y='79' width='4' height='14' rx='1'/%3E%3C/g%3E%3Ccircle cx='30' cy='30' r='14'/%3E%3Ccircle cx='30' cy='30' r='4'/%3E%3Ccircle cx='150' cy='150' r='11'/%3E%3Ccircle cx='150' cy='150' r='3.5'/%3E%3C/svg%3E");
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.025) 2px,
+      rgba(0, 0, 0, 0.025) 4px
+    );
+    pointer-events: none;
+    z-index: 9998;
   }
+
+  .light body {
+    background-image: none;
+  }
+
   /* Suppress browser-native focus outlines on all inputs/textareas site-wide.
      Focusable UI elements that need visible focus rings define them explicitly. */
   input, textarea, select {
@@ -112,4 +129,13 @@
     box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--color-accent);
     border-radius: var(--radius-input);
   }
+}
+
+@keyframes fui-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+@keyframes fui-glow-pulse {
+  0%, 100% { box-shadow: var(--glow-accent); }
+  50%       { box-shadow: none; }
 }

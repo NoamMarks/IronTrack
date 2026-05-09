@@ -407,7 +407,7 @@ export function WorkoutGridLogger({
           <button
             onClick={onBack}
             aria-label="Back"
-            className="shrink-0 w-11 h-11 rounded-xl border border-border/60 bg-card/60 backdrop-blur-md hover:bg-muted/40 hover:border-foreground/30 transition-all flex items-center justify-center"
+            className="shrink-0 w-11 h-11 border border-border/60 bg-card/60 backdrop-blur-md hover:bg-muted/40 hover:border-foreground/30 transition-all flex items-center justify-center"
           >
             <ArrowLeft className="w-5 h-5 text-foreground" />
           </button>
@@ -430,11 +430,10 @@ export function WorkoutGridLogger({
           aria-label="Finish workout"
           className="
             btn-press shrink-0 group relative overflow-hidden
-            bg-gradient-to-br from-emerald-500 to-emerald-600
-            text-white px-4 md:px-6 py-3 md:py-3.5
+            bg-accent text-background px-4 md:px-6 py-3 md:py-3.5
             text-[10px] md:text-xs font-bold uppercase tracking-[0.14em]
-            rounded-xl shadow-lg shadow-emerald-500/20
-            hover:shadow-xl hover:shadow-emerald-500/30 hover:-translate-y-0.5
+            shadow-[0_0_12px_rgba(0,255,136,0.3)]
+            hover:shadow-[0_0_20px_rgba(0,255,136,0.45)] hover:-translate-y-0.5
             transition-all duration-200
             flex items-center gap-2 min-h-[44px]
           "
@@ -451,8 +450,9 @@ export function WorkoutGridLogger({
       <div className="flex items-center gap-3">
         <div className="relative flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
           <motion.div
-            className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.5)]"
-            animate={{ width: `${progressPct}%` }}
+            className="absolute inset-y-0 left-0 right-0 bg-gradient-to-r from-primary via-primary/80 to-primary shadow-[0_0_12px_rgba(0,212,255,0.4)]"
+            style={{ transformOrigin: 'left' }}
+            animate={{ scaleX: progressPct / 100 }}
             transition={{ type: 'spring', stiffness: 180, damping: 24 }}
           />
         </div>
@@ -494,13 +494,13 @@ export function WorkoutGridLogger({
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25, delay: idx * 0.02 }}
               className={cn(
-                'relative group rounded-2xl overflow-hidden',
+                'relative group overflow-hidden',
                 'border transition-all duration-300',
                 completed
-                  ? 'border-emerald-500/30 bg-gradient-to-b from-emerald-500/5 via-card to-card opacity-80'
+                  ? 'border-accent/30 bg-gradient-to-b from-accent/5 via-card to-card opacity-80'
                   : allSetsDone
-                    ? 'border-emerald-500/40 bg-gradient-to-b from-emerald-500/[0.06] via-card to-card shadow-[0_0_0_1px_rgba(16,185,129,0.08),0_8px_32px_-12px_rgba(16,185,129,0.25)]'
-                    : 'border-border/60 bg-gradient-to-b from-card via-card to-card/80 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.45)] hover:border-foreground/20',
+                    ? 'border-accent/40 bg-gradient-to-b from-accent/[0.06] via-card to-card shadow-[0_0_0_1px_rgba(0,255,136,0.08),0_8px_32px_-12px_rgba(0,255,136,0.2)]'
+                    : 'border-border/60 bg-gradient-to-b from-card via-card to-card/80 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.45)] hover:border-primary/30',
               )}
             >
               {/* Sticky exercise header — pinned at the top of the scroll
@@ -519,13 +519,13 @@ export function WorkoutGridLogger({
                     every set is done. */}
                 <div
                   className={cn(
-                    'shrink-0 w-11 h-11 md:w-12 md:h-12 rounded-xl',
+                    'shrink-0 w-11 h-11 md:w-12 md:h-12',
                     'flex items-center justify-center',
                     'text-sm md:text-base font-bold font-mono tabular-nums',
                     'border transition-all duration-300',
                     allSetsDone
-                      ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white border-emerald-400/40 shadow-md shadow-emerald-500/20'
-                      : 'bg-gradient-to-br from-muted/60 to-muted/30 text-foreground border-border/60',
+                      ? 'bg-gradient-to-br from-accent to-accent/80 text-background border-accent/40 shadow-[0_0_12px_rgba(0,255,136,0.3)]'
+                      : 'bg-surface text-foreground border-border/60',
                   )}
                 >
                   {String(idx + 1).padStart(2, '0')}
@@ -533,7 +533,7 @@ export function WorkoutGridLogger({
 
                 <div className="min-w-0 flex-1">
                   <h3
-                    className="text-base md:text-lg font-bold uppercase tracking-tight italic font-serif text-foreground truncate leading-tight"
+                    className="text-base md:text-lg font-display font-bold uppercase tracking-wide text-foreground truncate leading-tight"
                     title={ex.exerciseName}
                   >
                     {ex.exerciseName}
@@ -552,9 +552,9 @@ export function WorkoutGridLogger({
                   {/* Progress chip — instant readout of "where am I". */}
                   <div
                     className={cn(
-                      'hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono tabular-nums border transition-colors',
+                      'hidden sm:flex items-center gap-1 px-2.5 py-1 text-[10px] font-mono tabular-nums border transition-colors',
                       allSetsDone
-                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                        ? 'bg-accent/15 border-accent/30 text-accent'
                         : 'bg-muted/40 border-border/40 text-muted-foreground',
                     )}
                   >
@@ -569,7 +569,7 @@ export function WorkoutGridLogger({
                       target="_blank"
                       rel="noreferrer"
                       aria-label="Play video"
-                      className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500 hover:text-white hover:border-blue-500 transition-all"
+                      className="w-10 h-10 flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500 hover:text-white hover:border-blue-500 transition-all"
                     >
                       <Play className="w-4 h-4" />
                     </a>
@@ -577,7 +577,7 @@ export function WorkoutGridLogger({
                     <button
                       onClick={() => { setUploadingFor(ex.id); fileInputRef.current?.click(); }}
                       aria-label="Upload video"
-                      className="w-10 h-10 rounded-xl flex items-center justify-center bg-muted/40 text-muted-foreground border border-border/40 hover:bg-muted hover:text-foreground hover:border-foreground/30 transition-all"
+                      className="w-10 h-10 flex items-center justify-center bg-muted/40 text-muted-foreground border border-border/40 hover:bg-muted hover:text-foreground hover:border-foreground/30 transition-all"
                     >
                       <Upload className="w-4 h-4" />
                     </button>
@@ -624,10 +624,10 @@ export function WorkoutGridLogger({
                       {/* Set badge */}
                       <div
                         className={cn(
-                          'shrink-0 w-9 h-9 md:w-10 md:h-10 rounded-lg flex items-center justify-center',
+                          'shrink-0 w-9 h-9 md:w-10 md:h-10 flex items-center justify-center',
                           'text-xs md:text-sm font-bold font-mono tabular-nums border transition-all',
                           setDone
-                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            ? 'bg-accent/15 text-accent border-accent/30'
                             : 'bg-muted/30 text-muted-foreground border-border/40',
                         )}
                       >
@@ -639,8 +639,8 @@ export function WorkoutGridLogger({
                           The plate-calc icon lives inside the cell. */}
                       <div
                         className={cn(
-                          'flex-1 flex items-baseline gap-1 px-2.5 md:px-3 py-1 rounded-lg border transition-all',
-                          'focus-within:border-foreground/40 focus-within:bg-muted/30',
+                          'flex-1 flex items-baseline gap-1 px-2.5 md:px-3 py-1 border transition-all',
+                          'focus-within:border-primary/60 focus-within:bg-primary/5',
                           loadFilled
                             ? 'bg-muted/30 border-border/60'
                             : 'bg-muted/15 border-border/30',
@@ -680,7 +680,7 @@ export function WorkoutGridLogger({
                           }}
                           aria-label="Plate calculator"
                           data-testid={`plate-calc-btn-${ex.id}-set-${setN}`}
-                          className="shrink-0 p-1 rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-muted/40 transition-colors"
+                          className="shrink-0 p-1 text-muted-foreground/60 hover:text-primary hover:bg-primary/10 transition-colors"
                         >
                           <Calculator className="w-3.5 h-3.5" />
                         </button>
@@ -689,8 +689,8 @@ export function WorkoutGridLogger({
                       {/* RPE cell — narrower, paired unit label "rpe" */}
                       <div
                         className={cn(
-                          'shrink-0 w-[88px] md:w-[100px] flex items-baseline gap-1 px-2.5 md:px-3 py-1 rounded-lg border transition-all',
-                          'focus-within:border-foreground/40 focus-within:bg-muted/30',
+                          'shrink-0 w-[88px] md:w-[100px] flex items-baseline gap-1 px-2.5 md:px-3 py-1 border transition-all',
+                          'focus-within:border-primary/60 focus-within:bg-primary/5',
                           rpeFilled
                             ? 'bg-muted/30 border-border/60'
                             : 'bg-muted/15 border-border/30',
@@ -730,10 +730,10 @@ export function WorkoutGridLogger({
                         aria-pressed={setDone}
                         data-testid={`set-done-toggle-${ex.id}-${setN}`}
                         className={cn(
-                          'shrink-0 w-10 h-10 rounded-lg flex items-center justify-center border transition-all',
+                          'shrink-0 w-10 h-10 flex items-center justify-center border transition-all',
                           setDone
-                            ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 border-emerald-400/40 text-white shadow-md shadow-emerald-500/20'
-                            : 'bg-muted/30 border-border/40 text-muted-foreground hover:border-emerald-500/40 hover:text-emerald-400',
+                            ? 'bg-accent border-accent/40 text-background shadow-[0_0_12px_rgba(0,255,136,0.35)]'
+                            : 'bg-muted/30 border-border/40 text-muted-foreground hover:border-accent/40 hover:text-accent',
                         )}
                       >
                         <AnimatePresence mode="wait" initial={false}>
@@ -831,29 +831,29 @@ export function WorkoutGridLogger({
           data-testid="finish-session-btn-bottom"
           className="
             mt-2 group relative overflow-hidden w-full
-            rounded-2xl border border-emerald-500/40
-            bg-gradient-to-br from-emerald-500/15 via-emerald-500/8 to-card
-            shadow-[0_8px_32px_-12px_rgba(16,185,129,0.45)]
-            hover:border-emerald-500/60 hover:shadow-[0_8px_40px_-10px_rgba(16,185,129,0.55)]
+            border border-accent/40
+            bg-gradient-to-br from-accent/15 via-accent/8 to-card
+            shadow-[0_8px_32px_-12px_rgba(0,255,136,0.45)]
+            hover:border-accent/60 hover:shadow-[0_8px_40px_-10px_rgba(0,255,136,0.55)]
             transition-all duration-300 px-5 md:px-7 py-5 md:py-6
             flex items-center gap-4 md:gap-5
           "
         >
-          <div className="absolute -top-12 -right-12 w-40 h-40 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -top-12 -right-12 w-40 h-40 bg-accent/15 rounded-full blur-3xl pointer-events-none" />
           <div className="
-            shrink-0 w-12 h-12 md:w-14 md:h-14 rounded-2xl
-            bg-gradient-to-br from-emerald-500 to-emerald-600
+            shrink-0 w-12 h-12 md:w-14 md:h-14
+            bg-accent text-background
             flex items-center justify-center
-            shadow-lg shadow-emerald-500/30
+            shadow-[0_0_16px_rgba(0,255,136,0.4)]
             group-hover:scale-105 transition-transform duration-200
           ">
-            <Trophy className="w-5 h-5 md:w-6 md:h-6 text-white" />
+            <Trophy className="w-5 h-5 md:w-6 md:h-6" />
           </div>
           <div className="relative min-w-0 flex-1 text-left">
-            <div className="text-[10px] md:text-[11px] font-mono uppercase tracking-[0.18em] text-emerald-400/90">
+            <div className="text-[10px] md:text-[11px] font-mono uppercase tracking-[0.18em] text-accent/90">
               {totalDone === totalSets ? 'All Sets Logged' : `${totalDone} / ${totalSets} Sets Logged`}
             </div>
-            <div className="text-lg md:text-xl font-bold tracking-tight italic font-serif text-foreground mt-0.5">
+            <div className="text-lg md:text-xl font-display font-bold tracking-tight text-foreground mt-0.5">
               Finish Workout
             </div>
             <div className="text-[10px] md:text-[11px] font-mono text-muted-foreground mt-0.5">
@@ -964,7 +964,7 @@ function DeltaBadge({ delta, testId }: { delta: number; testId: string }) {
       <span
         data-testid={testId}
         data-delta-direction="up"
-        className="inline-flex items-center gap-0.5 px-1.5 py-px rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+        className="inline-flex items-center gap-0.5 px-1.5 py-px border border-accent/30 bg-accent/10 text-accent"
       >
         <TrendingUp className="w-2.5 h-2.5" />
         <span>+{delta}</span>
@@ -977,7 +977,7 @@ function DeltaBadge({ delta, testId }: { delta: number; testId: string }) {
       <span
         data-testid={testId}
         data-delta-direction="down"
-        className="inline-flex items-center gap-0.5 px-1.5 py-px rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300"
+        className="inline-flex items-center gap-0.5 px-1.5 py-px border border-danger/30 bg-danger/10 text-danger"
       >
         <TrendingDown className="w-2.5 h-2.5" />
         <span>{delta}</span>
@@ -989,7 +989,7 @@ function DeltaBadge({ delta, testId }: { delta: number; testId: string }) {
     <span
       data-testid={testId}
       data-delta-direction="same"
-      className="inline-flex items-center gap-0.5 px-1.5 py-px rounded-full border border-border/50 bg-muted/30 text-muted-foreground"
+      className="inline-flex items-center gap-0.5 px-1.5 py-px border border-border/50 bg-muted/30 text-muted-foreground"
     >
       <Minus className="w-2.5 h-2.5" />
       <span>same</span>

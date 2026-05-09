@@ -210,8 +210,8 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
                   className={cn(
                     'px-4 py-2 text-[10px] font-mono uppercase tracking-widest transition-colors',
                     view === v
-                      ? 'bg-foreground text-background'
-                      : 'bg-card text-muted-foreground hover:text-foreground',
+                      ? 'bg-primary/20 text-primary border-b-2 border-primary'
+                      : 'bg-surface text-muted-foreground hover:text-primary',
                   )}
                 >
                   {v === 'e1rm' ? '1RM' : v === 'volume' ? 'Volume' : 'DOTS'}
@@ -231,8 +231,8 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
                   className={cn(
                     'px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest border transition-all',
                     selectedExerciseId === ex.id
-                      ? 'bg-foreground text-background border-foreground'
-                      : 'border-border text-muted-foreground hover:border-muted-foreground'
+                      ? 'bg-primary/20 text-primary border-primary'
+                      : 'border-border/50 text-muted-foreground hover:border-primary hover:text-primary'
                   )}
                 >
                   {ex.name}
@@ -243,7 +243,7 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
 
           {/* DOTS controls — only shown in DOTS view */}
           {view === 'dots' && (
-            <div className="grid grid-cols-1 md:grid-cols-[auto_1fr] gap-3 items-end p-4 border border-border bg-muted/20">
+            <div className="grid grid-cols-1 md:grid-cols-[auto_1fr] gap-3 items-end p-4 border border-primary/20 bg-surface/50">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
                   Class
@@ -259,8 +259,8 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
                       className={cn(
                         'px-4 py-2 text-[10px] font-mono uppercase tracking-widest transition-colors',
                         dotsPrefs.sex === s
-                          ? 'bg-foreground text-background'
-                          : 'bg-card text-muted-foreground hover:text-foreground',
+                          ? 'bg-primary/20 text-primary'
+                          : 'bg-surface text-muted-foreground hover:text-primary',
                       )}
                     >
                       {s === 'male' ? 'Men' : 'Women'}
@@ -273,7 +273,7 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
                   Current bodyweight (kg)
                 </label>
                 <div className="flex items-center gap-3">
-                  <div className="flex-1 bg-card p-3 border border-border">
+                  <div className="flex-1 bg-surface p-3 border-b border-primary/30">
                     <input
                       type="text"
                       inputMode="decimal"
@@ -422,11 +422,12 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
 // ─── Charts ────────────────────────────────────────────────────────────────
 
 const TOOLTIP_STYLE = {
-  backgroundColor: 'hsl(var(--card))',
-  border: '1px solid hsl(var(--border))',
-  borderRadius: '2px',
-  fontSize: '12px',
-  fontFamily: 'monospace',
+  backgroundColor: '#0A1628',
+  border: '1px solid rgba(0, 212, 255, 0.2)',
+  borderRadius: '0px',
+  fontSize: '11px',
+  fontFamily: 'JetBrains Mono, monospace',
+  color: '#E2F4FF',
 } as const;
 
 function E1rmChart({ data }: { data: ReturnType<typeof aggregateE1RM> }) {
@@ -436,8 +437,8 @@ function E1rmChart({ data }: { data: ReturnType<typeof aggregateE1RM> }) {
         <AreaChart data={data} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="e1rmGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#22c55e" stopOpacity={0.6} />
-              <stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
+              <stop offset="0%" stopColor="#00FF88" stopOpacity={0.6} />
+              <stop offset="100%" stopColor="#00FF88" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} />
@@ -448,10 +449,10 @@ function E1rmChart({ data }: { data: ReturnType<typeof aggregateE1RM> }) {
             type="monotone"
             dataKey="e1rm"
             name="e1RM (kg)"
-            stroke="#22c55e"
+            stroke="#00FF88"
             strokeWidth={2}
             fill="url(#e1rmGradient)"
-            dot={{ fill: '#22c55e', r: 4 }}
+            dot={{ fill: '#00FF88', r: 4 }}
             activeDot={{ r: 6 }}
           />
         </AreaChart>
@@ -467,8 +468,8 @@ function VolumeChart({ data }: { data: ReturnType<typeof aggregateVolume> }) {
         <AreaChart data={data} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="volumeGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.6} />
-              <stop offset="100%" stopColor="#38bdf8" stopOpacity={0} />
+              <stop offset="0%" stopColor="#00D4FF" stopOpacity={0.6} />
+              <stop offset="100%" stopColor="#00D4FF" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} />
@@ -479,10 +480,10 @@ function VolumeChart({ data }: { data: ReturnType<typeof aggregateVolume> }) {
             type="monotone"
             dataKey="volume"
             name="Tonnage (kg)"
-            stroke="#38bdf8"
+            stroke="#00D4FF"
             strokeWidth={2}
             fill="url(#volumeGradient)"
-            dot={{ fill: '#38bdf8', r: 4 }}
+            dot={{ fill: '#00D4FF', r: 4 }}
             activeDot={{ r: 6 }}
           />
         </AreaChart>
@@ -500,8 +501,8 @@ function DotsChart({ data }: { data: Array<{ date: string; score: number }> }) {
         <AreaChart data={data} margin={{ top: 16, right: 16, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="dotsGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.6} />
-              <stop offset="100%" stopColor="#f59e0b" stopOpacity={0} />
+              <stop offset="0%" stopColor="#FFB300" stopOpacity={0.6} />
+              <stop offset="100%" stopColor="#FFB300" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.1} />
@@ -512,10 +513,10 @@ function DotsChart({ data }: { data: Array<{ date: string; score: number }> }) {
             type="monotone"
             dataKey="score"
             name="DOTS"
-            stroke="#f59e0b"
+            stroke="#FFB300"
             strokeWidth={2}
             fill="url(#dotsGradient)"
-            dot={{ fill: '#f59e0b', r: 4 }}
+            dot={{ fill: '#FFB300', r: 4 }}
             activeDot={{ r: 6 }}
           />
         </AreaChart>
@@ -564,21 +565,21 @@ function StatCell({
 }) {
   const ring =
     tone === 'emerald'
-      ? 'border-emerald-500/30 bg-emerald-500/[0.06]'
+      ? 'border-accent/30 bg-accent/[0.06]'
       : tone === 'amber'
-        ? 'border-amber-500/30 bg-amber-500/[0.06]'
+        ? 'border-warning/30 bg-warning/[0.06]'
         : 'border-border/50 bg-muted/20';
   const accent =
     tone === 'emerald'
-      ? 'text-emerald-300'
+      ? 'text-accent'
       : tone === 'amber'
-        ? 'text-amber-300'
+        ? 'text-warning'
         : 'text-muted-foreground';
   return (
     <div
       data-testid={testId}
       className={cn(
-        'rounded-xl border p-3 md:p-4 flex flex-col gap-1',
+        'border p-3 md:p-4 flex flex-col gap-1',
         ring,
       )}
     >
@@ -586,7 +587,7 @@ function StatCell({
         {icon}
         <span>{label}</span>
       </div>
-      <div className="text-lg md:text-xl font-bold tabular-nums tracking-tight text-foreground">
+      <div className="text-lg md:text-xl font-mono font-bold tabular-nums tracking-tight text-foreground">
         {primary}
       </div>
       <div className="text-[10px] font-mono text-muted-foreground/70 truncate" title={secondary}>
@@ -605,7 +606,9 @@ function EmptyChart({ message }: { message: string }) {
       className="flex flex-col items-center justify-center py-16 text-center"
       data-testid="empty-chart"
     >
-      <AlertCircle className="w-8 h-8 text-muted-foreground mb-3" />
+      <div className="w-10 h-10 border border-border/50 flex items-center justify-center mb-3">
+        <AlertCircle className="w-5 h-5 text-muted-foreground" />
+      </div>
       <p className="text-xs font-mono text-muted-foreground max-w-sm">{message}</p>
     </motion.div>
   );

@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { LazyMotion, domAnimation } from 'motion/react';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import { PrivacyPolicy } from './components/static/PrivacyPolicy';
@@ -12,7 +13,11 @@ import './index.css';
 const Root = window.location.pathname === '/privacy' ? <PrivacyPolicy /> : <App />;
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>{Root}</React.StrictMode>,
+  <React.StrictMode>
+    <LazyMotion features={domAnimation} strict>
+      {Root}
+    </LazyMotion>
+  </React.StrictMode>,
 );
 
 // PWA service worker — web only. Capacitor's native WebView serves assets

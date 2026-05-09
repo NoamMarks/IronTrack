@@ -55,7 +55,7 @@ export function RPECalculator() {
           <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
             Weight (kg)
           </label>
-          <div className="bg-muted/30 p-3 border border-border">
+          <div className="bg-surface p-3 border-b border-border">
             <input
               type="text"
               inputMode="decimal"
@@ -75,7 +75,7 @@ export function RPECalculator() {
           <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
             Reps
           </label>
-          <div className="bg-muted/30 p-3 border border-border">
+          <div className="bg-surface p-3 border-b border-border">
             <input
               type="text"
               inputMode="numeric"
@@ -108,8 +108,8 @@ export function RPECalculator() {
               className={cn(
                 'px-2.5 py-1.5 text-[11px] font-mono tabular-nums border transition-colors',
                 rpe === v
-                  ? 'bg-foreground text-background border-foreground'
-                  : 'border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground',
+                  ? 'bg-primary/20 text-primary border-primary'
+                  : 'border-border/50 text-muted-foreground hover:text-foreground',
               )}
             >
               {v}
@@ -126,7 +126,7 @@ export function RPECalculator() {
           </span>
           <span
             data-testid="rpe-e1rm"
-            className="text-3xl font-bold font-serif italic text-foreground tabular-nums leading-none"
+            className="text-3xl font-display font-bold text-primary tabular-nums leading-none"
           >
             {e1rm ? `${e1rm} kg` : '—'}
           </span>
@@ -135,7 +135,7 @@ export function RPECalculator() {
         {targets && (
           <div className="grid grid-cols-4 gap-px bg-border">
             {targets.map((t) => (
-              <div key={t.label} className="bg-card px-2 py-2 text-center">
+              <div key={t.label} className="bg-surface px-2 py-2 text-center">
                 <p className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest">
                   {t.label}
                 </p>

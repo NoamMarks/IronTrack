@@ -163,9 +163,9 @@ export interface StrengthTier {
  */
 export function strengthTier(score: number | null): StrengthTier | null {
   if (score === null) return null;
-  if (score < 200) return { label: 'Developing',   color: 'text-zinc-400'    };
-  if (score < 300) return { label: 'Intermediate', color: 'text-sky-400'     };
-  if (score < 400) return { label: 'Advanced',     color: 'text-emerald-400' };
-  if (score < 500) return { label: 'Elite',        color: 'text-amber-400'   };
-  return            { label: 'World-Class',        color: 'text-red-400'     };
+  if (score < 200) return { label: 'Developing',   color: 'text-muted-foreground' };
+  if (score < 300) return { label: 'Intermediate', color: 'text-primary'         };
+  if (score < 400) return { label: 'Advanced',     color: 'text-accent'          };
+  if (score < 500) return { label: 'Elite',        color: 'text-warning'         };
+  return            { label: 'World-Class',        color: 'text-danger'          };
 }

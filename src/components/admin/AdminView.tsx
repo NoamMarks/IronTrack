@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ProgramEditor } from './ProgramEditor';
 import { RecentActivityPanel } from './RecentActivityPanel';
 import { TemplateBrowser } from './TemplateBrowser';
-import { Modal, Toast } from '../ui';
+import { Modal, Toast, Button } from '../ui';
 import { cn } from '../../lib/utils';
 import {
   createInviteCode,
@@ -417,7 +417,7 @@ export function AdminView({
       <div className="grid grid-cols-[300px_1fr] xl:grid-cols-[300px_1fr_320px] gap-8 xl:gap-10">
         {/* Client list */}
         <div className="space-y-6">
-          <h3 className="text-xs font-mono uppercase text-muted-foreground tracking-widest border-b border-border pb-2">
+          <h3 className="text-xs font-mono uppercase text-primary/60 tracking-widest border-b border-primary/20 pb-2">
             Select Client
           </h3>
           <div className="space-y-3">
@@ -433,8 +433,8 @@ export function AdminView({
                   className={cn(
                     'w-full text-left p-6 border transition-all rounded-sm pr-12',
                     selectedClient?.id === c.id
-                      ? 'bg-foreground text-background border-foreground shadow-lg scale-[1.02]'
-                      : 'border-border hover:border-muted-foreground bg-card'
+                      ? 'bg-primary/10 text-primary border border-primary shadow-glow-primary scale-[1.02]'
+                      : 'border-border hover:border-primary/50 bg-surface/50'
                   )}
                 >
                   <p className="font-bold text-lg tracking-tight">{c.name}</p>
@@ -462,23 +462,25 @@ export function AdminView({
             <>
               <div className="flex justify-end items-center gap-2">
                 {onDuplicateProgram && (
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => void handleDuplicateProgram()}
                     data-testid="duplicate-block-btn"
-                    className="flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-widest border border-border text-muted-foreground hover:bg-foreground hover:text-background transition-all"
                   >
-                    <Copy className="w-4 h-4" />
+                    <Copy className="w-3.5 h-3.5 mr-1.5" />
                     Duplicate Block
-                  </button>
+                  </Button>
                 )}
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={handleArchiveProgram}
                   data-testid="archive-block-btn"
-                  className="flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-widest border border-amber-500/50 text-amber-500 hover:bg-amber-500 hover:text-background transition-all"
                 >
-                  <Archive className="w-4 h-4" />
-                  Archive Current Block
-                </button>
+                  <Archive className="w-3.5 h-3.5 mr-1.5" />
+                  Archive Block
+                </Button>
               </div>
               <ProgramEditor
                 program={editingProgram}
@@ -491,26 +493,26 @@ export function AdminView({
               <p className="text-muted-foreground font-mono text-xs uppercase tracking-widest">
                 No program assigned
               </p>
-              <h2 className="text-4xl font-bold italic font-serif text-foreground tracking-tight">
+              <h2 className="text-3xl font-display font-bold uppercase tracking-widest text-foreground">
                 Ready to Build?
               </h2>
               <div className="flex flex-wrap gap-3 justify-center">
-                <button
+                <Button
+                  variant="primary"
                   onClick={handleCreateProgram}
                   data-testid="create-block-btn"
-                  className="bg-foreground text-background px-8 py-4 text-xs font-bold uppercase tracking-widest hover:opacity-90 transition-all shadow-lg"
                 >
-                  + Create New Block
-                </button>
+                  Create New Block
+                </Button>
                 {onCreateProgramFromTemplate && (
-                  <button
+                  <Button
+                    variant="ghost"
                     onClick={() => setLoadTemplateOpen(true)}
                     data-testid="open-template-browser-btn"
-                    className="flex items-center gap-2 border border-foreground text-foreground px-8 py-4 text-xs font-bold uppercase tracking-widest hover:bg-foreground hover:text-background transition-all shadow-sm"
                   >
-                    <Library className="w-4 h-4" />
+                    <Library className="w-3.5 h-3.5 mr-1.5" />
                     Load from Template
-                  </button>
+                  </Button>
                 )}
               </div>
               {onCreateProgramFromTemplate && templates.length > 0 && (

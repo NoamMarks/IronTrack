@@ -31,8 +31,9 @@ export function Toast({ message, onDismiss }: ToastProps) {
           className={[
             'fixed bottom-6 left-1/2 -translate-x-1/2 z-[200]',
             'flex items-center gap-2 px-5 py-3',
-            'bg-accent text-accent-foreground',
-            'rounded-input shadow-2xl',
+            'bg-surface border border-accent/50',
+            'shadow-glow-accent',
+            'text-accent',
             'font-mono text-xs uppercase tracking-widest',
             'cursor-pointer select-none',
           ].join(' ')}

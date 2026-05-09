@@ -128,8 +128,8 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
               }
               className={cn(
                 'flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-widest border transition-all',
-                notifPermission === 'granted' && 'bg-green-600 text-white border-green-600',
-                notifPermission === 'denied'  && 'border-amber-500/50 text-amber-500 cursor-not-allowed',
+                notifPermission === 'granted' && 'bg-accent/20 text-accent border-accent',
+                notifPermission === 'denied'  && 'border-warning/50 text-warning cursor-not-allowed',
                 notifPermission === 'default' && 'border-border text-muted-foreground hover:border-muted-foreground',
               )}
             >
@@ -150,7 +150,7 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
               className={cn(
                 'flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-widest border transition-all',
                 wakeLock.isActive
-                  ? 'bg-green-600 text-white border-green-600'
+                  ? 'bg-accent/20 text-accent border-accent'
                   : 'border-border text-muted-foreground hover:border-muted-foreground'
               )}
             >
@@ -290,30 +290,30 @@ function CurrentBlockView({
           onClick={() => onStartWorkout(resumeTarget.week, resumeTarget.day)}
           data-testid="resume-workout-cta"
           className="
-            group relative w-full text-left overflow-hidden rounded-2xl
-            bg-gradient-to-br from-emerald-500/15 via-emerald-500/5 to-card
-            border border-emerald-500/30
-            shadow-[0_8px_32px_-12px_rgba(16,185,129,0.45)]
-            hover:border-emerald-500/50 hover:shadow-[0_8px_40px_-10px_rgba(16,185,129,0.55)]
-            transition-all duration-300
+            group relative w-full text-left overflow-hidden
+            bg-gradient-to-br from-accent/15 via-accent/5 to-card
+            border border-accent/30
+            shadow-[0_8px_32px_-12px_rgba(0,255,136,0.45)]
+            hover:border-accent/50 hover:shadow-[0_8px_40px_-10px_rgba(0,255,136,0.55)]
+            transition-[border-color,box-shadow] duration-300
             px-5 md:px-7 py-5 md:py-6
           "
         >
           {/* Decorative corner glow */}
-          <div className="absolute -top-12 -right-12 w-40 h-40 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -top-12 -right-12 w-40 h-40 bg-accent/20 rounded-full blur-3xl pointer-events-none" />
 
           <div className="relative flex items-center gap-4 md:gap-5">
             <div className="
-              shrink-0 w-12 h-12 md:w-14 md:h-14 rounded-2xl
-              bg-gradient-to-br from-emerald-500 to-emerald-600
+              shrink-0 w-12 h-12 md:w-14 md:h-14
+              bg-gradient-to-br from-accent to-accent/80
               flex items-center justify-center
-              shadow-lg shadow-emerald-500/30
+              shadow-lg shadow-accent/30
               group-hover:scale-105 transition-transform duration-200
             ">
               <Play className="w-5 h-5 md:w-6 md:h-6 text-white ml-0.5" fill="currentColor" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-[10px] md:text-[11px] font-mono uppercase tracking-[0.18em] text-emerald-400/90">
+              <div className="text-[10px] md:text-[11px] font-mono uppercase tracking-[0.18em] text-accent/90">
                 {resumeTarget.day.loggedAt ? 'Re-log Last Session' : 'Up Next'}
               </div>
               <h2 className="text-xl md:text-2xl font-bold tracking-tight italic font-serif text-foreground truncate mt-0.5">
@@ -325,7 +325,7 @@ function CurrentBlockView({
                 {resumeTarget.day.exercises.length} exercise{resumeTarget.day.exercises.length === 1 ? '' : 's'}
               </div>
             </div>
-            <ArrowRight className="shrink-0 w-5 h-5 text-emerald-400/70 group-hover:translate-x-1 group-hover:text-emerald-400 transition-all" />
+            <ArrowRight className="shrink-0 w-5 h-5 text-accent/70 group-hover:translate-x-1 group-hover:text-accent transition-colors" />
           </div>
         </motion.button>
       )}
@@ -353,12 +353,12 @@ function CurrentBlockView({
                 data-testid={`week-tab-${w.weekNumber}`}
                 aria-pressed={active}
                 className={cn(
-                  'snap-start shrink-0 relative px-4 py-3 rounded-xl border transition-all min-w-[72px]',
+                  'snap-start shrink-0 relative px-4 py-3 border transition-all min-w-[72px]',
                   'flex flex-col items-center justify-center gap-0.5',
                   active
                     ? 'bg-foreground text-background border-foreground shadow-lg shadow-black/30'
                     : stats.complete
-                      ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/15'
+                      ? 'bg-accent/10 text-accent border-accent/30 hover:bg-accent/15'
                       : stats.logged > 0
                         ? 'bg-card text-foreground border-border/60 hover:border-foreground/30'
                         : 'bg-card/60 text-muted-foreground border-border/40 hover:text-foreground hover:border-border',
@@ -413,11 +413,11 @@ function CurrentBlockView({
                   onClick={() => { hapticNav(); onStartWorkout(selectedWeek, day); }}
                   data-testid={`log-session-btn-day-${day.dayNumber}`}
                   className={cn(
-                    'group relative text-left overflow-hidden rounded-2xl border transition-all',
+                    'group relative text-left overflow-hidden border transition-all',
                     'px-4 md:px-5 py-4 md:py-5',
                     'hover:-translate-y-0.5',
                     logged
-                      ? 'bg-gradient-to-br from-emerald-500/8 to-card border-emerald-500/25 hover:border-emerald-500/40'
+                      ? 'bg-gradient-to-br from-accent/8 to-card border-accent/25 hover:border-accent/40'
                       : 'bg-gradient-to-br from-card via-card to-card/70 border-border/60 hover:border-foreground/30 shadow-[0_6px_24px_-12px_rgba(0,0,0,0.5)]',
                   )}
                 >
@@ -428,7 +428,7 @@ function CurrentBlockView({
                           Day {day.dayNumber}
                         </span>
                         {logged && (
-                          <span className="inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-widest text-emerald-400">
+                          <span className="inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-widest text-accent">
                             <CheckCircle2 className="w-3 h-3" />
                             Logged
                           </span>
@@ -445,16 +445,16 @@ function CurrentBlockView({
                           onClick={(e) => { e.stopPropagation(); onViewHistory(day); }}
                           aria-label={`View session log for ${day.name}`}
                           data-testid={`view-history-btn-day-${day.dayNumber}`}
-                          className="w-8 h-8 flex items-center justify-center border border-border/50 text-muted-foreground hover:border-foreground hover:text-foreground transition-colors"
+                          className="w-8 h-8 flex items-center justify-center border border-border/50 text-muted-foreground hover:border-primary hover:text-primary transition-colors"
                           title="View session log"
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </button>
                       )}
                       <div className={cn(
-                        'w-9 h-9 rounded-xl flex items-center justify-center transition-all',
+                        'w-9 h-9 flex items-center justify-center transition-colors',
                         logged
-                          ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                          ? 'bg-accent/15 text-accent border border-accent/30'
                           : 'bg-muted/40 text-muted-foreground border border-border/40 group-hover:bg-foreground group-hover:text-background group-hover:border-foreground',
                       )}>
                         {logged ? (
@@ -491,7 +491,7 @@ function CurrentBlockView({
                                 aria-label={`Watch technique video for ${ex.exerciseName}`}
                                 data-testid={`exercise-video-${ex.id}`}
                                 title="Watch technique video"
-                                className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-sm border border-blue-500/30 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500 hover:text-blue-300 transition-colors"
+                                className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-sm border border-primary/30 text-primary hover:bg-primary/15 hover:border-primary hover:text-primary/80 transition-colors"
                               >
                                 <Video className="w-3 h-3" />
                               </a>

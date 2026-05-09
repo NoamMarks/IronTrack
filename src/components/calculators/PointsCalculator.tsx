@@ -39,8 +39,8 @@ export function PointsCalculator() {
               className={cn(
                 'py-2 text-[11px] font-mono uppercase tracking-widest transition-colors',
                 sex === s
-                  ? 'bg-foreground text-background'
-                  : 'bg-card text-muted-foreground hover:text-foreground',
+                  ? 'bg-primary/20 text-primary border border-primary'
+                  : 'bg-surface text-muted-foreground hover:text-foreground',
               )}
             >
               {s === 'male' ? 'Men' : 'Women'}
@@ -54,7 +54,7 @@ export function PointsCalculator() {
           <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
             Bodyweight (kg)
           </label>
-          <div className="bg-muted/30 p-3 border border-border">
+          <div className="bg-surface p-3 border-b border-border">
             <input
               type="text"
               inputMode="decimal"
@@ -74,7 +74,7 @@ export function PointsCalculator() {
           <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
             Total (kg)
           </label>
-          <div className="bg-muted/30 p-3 border border-border">
+          <div className="bg-surface p-3 border-b border-border">
             <input
               type="text"
               inputMode="decimal"
@@ -99,7 +99,7 @@ export function PointsCalculator() {
           </span>
           <span
             data-testid="points-score"
-            className="text-3xl font-bold font-serif italic text-foreground tabular-nums leading-none"
+            className="text-3xl font-display font-bold text-primary tabular-nums leading-none"
           >
             {score ?? '—'}
           </span>

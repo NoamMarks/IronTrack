@@ -32,8 +32,8 @@ export default defineConfig({
         name: 'IronTrack',
         short_name: 'IronTrack',
         description: 'Unified Training Management System for coaches and trainees.',
-        theme_color: '#09090b',
-        background_color: '#09090b',
+        theme_color: '#020408',
+        background_color: '#020408',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
@@ -63,6 +63,18 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react':    ['react', 'react-dom'],
+          'vendor-motion':   ['motion'],
+          'vendor-recharts': ['recharts'],
+          'vendor-supabase': ['@supabase/supabase-js'],
+        },
+      },
+    },
+  },
   define: {
     // Surfaced in the dashboard footer (e.g. ClientDashboard's "IronTrack
     // v{__APP_VERSION__}") so users can report which build they're on.

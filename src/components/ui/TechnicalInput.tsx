@@ -66,9 +66,15 @@ export function TechnicalInput({
       aria-valuemax={ariaValueMax}
       data-testid={testId}
       className={cn(
-        'bg-transparent border-none outline-none focus:ring-0 text-foreground font-mono text-sm w-full placeholder:text-muted-foreground',
-        readOnly && 'cursor-not-allowed opacity-80',
-        className
+        'bg-transparent w-full',
+        'border-b border-border',
+        'text-foreground font-mono text-sm',
+        'placeholder:text-muted-foreground/50',
+        'transition-all duration-150',
+        'focus:border-primary focus:outline-none',
+        '[&:focus]:drop-shadow-[0_1px_4px_rgba(0,212,255,0.5)]',
+        readOnly && 'opacity-50 cursor-not-allowed',
+        className,
       )}
     />
   );
