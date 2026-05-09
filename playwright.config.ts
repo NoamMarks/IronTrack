@@ -7,7 +7,14 @@ import { defineConfig } from '@playwright/test';
  *
  * If port 3000 is free Playwright will spin up `vercel dev` itself; if a
  * dev server is already running it reuses it.
+ *
+ * Set `PLAYWRIGHT_BASE_URL` to retarget the suite at a deployed URL (e.g.
+ * production verification). When set, the local webServer config is
+ * skipped — we don't need a dev server for an external target.
  */
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
+const useExternalTarget = !!process.env.PLAYWRIGHT_BASE_URL;
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
@@ -17,7 +24,7 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL,
     headless: true,
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
@@ -29,10 +36,12 @@ export default defineConfig({
       use: { browserName: 'chromium' },
     },
   ],
-  webServer: {
-    command: 'npx vercel dev',
-    port: 3000,
-    reuseExistingServer: true,
-    timeout: 60_000,
-  },
+  webServer: useExternalTarget
+    ? undefined
+    : {
+        command: 'npx vercel dev',
+        port: 3000,
+        reuseExistingServer: true,
+        timeout: 60_000,
+      },
 });

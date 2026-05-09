@@ -43,9 +43,11 @@ export function ForgotPasswordPage({ onBack, theme, onToggleTheme }: ForgotPassw
     try {
       const redirectTo = (() => {
         if (typeof window === 'undefined') return undefined;
+        // Land at the SPA root — useAuth picks up the recovery token from
+        // the URL hash. There is no /reset-password route in this app.
         const base = (import.meta.env.VITE_PUBLIC_URL as string | undefined)?.trim()
           || window.location.origin;
-        return `${base.replace(/\/+$/, '')}/reset-password`;
+        return base.replace(/\/+$/, '');
       })();
 
       const { error } = await supabase.auth.resetPasswordForEmail(

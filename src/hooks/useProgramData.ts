@@ -169,6 +169,25 @@ const PROGRAM_TREE_SELECT = `
   )
 `;
 
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  attempts = 3,
+  baseDelayMs = 1000,
+): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (i < attempts - 1) {
+        await new Promise(r => setTimeout(r, Math.min(baseDelayMs * Math.pow(2, i), 8000)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useProgramData(authenticatedUser: Client | null) {
@@ -193,7 +212,7 @@ export function useProgramData(authenticatedUser: Client | null) {
     }
     setIsLoadingData(true);
     try {
-      const next = await fetchClientsForUser(authenticatedUser);
+      const next = await withRetry(() => fetchClientsForUser(authenticatedUser));
       setClients(next);
     } catch (err) {
       console.error('[IronTrack data] fetch failed', err);

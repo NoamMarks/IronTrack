@@ -20,7 +20,14 @@ import {
   Activity,
   Gauge,
   Trophy,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
+
+// `Wifi` is imported alongside WifiOff so a future "back online" momentary
+// indicator can use it without re-touching the import block. void keeps
+// noUnusedLocals quiet without dropping the symbol.
+void Wifi;
 import { motion, AnimatePresence } from 'motion/react';
 
 import { KeepAwake } from '@capacitor-community/keep-awake';
@@ -897,8 +904,44 @@ function AppShell({
   onUpdateUser: (patch: Partial<Client>) => void;
 }) {
   const [showSettings, setShowSettings] = useState(false);
+
+  // Online/offline detection — drives the warning banner at the top of
+  // every authenticated screen. The hook lives in AppShell rather than App
+  // so the banner is rendered above the impersonation banner inside every
+  // shell-wrapped view (admin / dashboard / coach roster / superadmin)
+  // without each branch having to opt in.
+  const [isOnline, setIsOnline] = useState(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true,
+  );
+
+  useEffect(() => {
+    const onOnline = () => setIsOnline(true);
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Offline banner — fixed-top so it overlays the rest of the chrome
+          rather than pushing layout down when connectivity flips. */}
+      {!isOnline && (
+        <div
+          role="alert"
+          data-testid="offline-banner"
+          className="fixed top-0 left-0 right-0 z-[9999] bg-warning/10 border-b border-warning/40 px-4 py-2 flex items-center justify-center gap-2"
+        >
+          <WifiOff className="w-3.5 h-3.5 text-warning shrink-0" />
+          <span className="text-[10px] font-mono uppercase tracking-widest text-warning">
+            No connection — changes may not save until you're back online
+          </span>
+        </div>
+      )}
+
       {/* Impersonation banner */}
       {impersonating && (
         <div className="bg-amber-600 text-white px-4 py-2 text-xs font-mono uppercase tracking-widest flex justify-between items-center">
@@ -982,6 +1025,7 @@ export default function App() {
   const {
     clients,
     isLoadingData,
+    refetch,
     addClient,
     saveProgram,
     saveSession,
@@ -1461,6 +1505,41 @@ export default function App() {
         />
         <Toast message={toast ?? null} onDismiss={dismissToast} />
       </>
+    );
+  }
+
+  // ── Data load error gate ───────────────────────────────────────────────
+  // The hook swallows fetch failures (logs + setClients([])), which leaves
+  // an empty roster looking identical to a brand-new account. For
+  // authenticated trainees / coaches who *should* have data, that's a
+  // confusing zero-state. Surface a recoverable banner instead so the
+  // user knows it was a transient failure and can retry. Superadmin is
+  // legitimately empty when no coaches exist yet, so they're excluded.
+  if (
+    authenticatedUser
+    && !isLoadingData
+    && clients.length === 0
+    && authenticatedUser.role !== 'superadmin'
+  ) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-8">
+        <div className="relative border border-warning/40 bg-surface p-8 max-w-sm w-full space-y-4 text-center">
+          <span className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-warning/60" />
+          <span className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-warning/60" />
+          <span className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-warning/60" />
+          <span className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-warning/60" />
+          <p className="text-[10px] font-mono uppercase tracking-widest text-warning/70">Connection Issue</p>
+          <p className="font-display font-bold uppercase text-lg text-foreground">Could not load your data</p>
+          <p className="font-mono text-xs text-muted-foreground">Check your connection and try again.</p>
+          <button
+            onClick={() => void refetch()}
+            data-testid="data-error-retry-btn"
+            className="w-full py-3 border border-warning text-warning font-mono text-xs uppercase tracking-widest hover:bg-warning/10 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
     );
   }
 
