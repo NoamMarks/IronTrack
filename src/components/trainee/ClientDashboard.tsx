@@ -1,11 +1,12 @@
 import { useState, useMemo, useEffect } from 'react';
-import { ArrowLeft, AlertCircle, Smartphone, Archive, Play, CheckCircle2, Circle, ArrowRight, Bell, BellOff, Video } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Smartphone, Archive, Play, CheckCircle2, Circle, ArrowRight, Bell, BellOff, Video, Eye } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TechnicalCard } from '../ui';
 import { cn } from '../../lib/utils';
 import { useWakeLock } from '../../hooks/useWakeLock';
 import { hapticNav } from '../../lib/haptics';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
+import { WorkoutHistoryModal } from './WorkoutHistoryModal';
 import type { Client, Program, WorkoutWeek, WorkoutDay } from '../../types';
 
 interface ClientDashboardProps {
@@ -57,6 +58,8 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
   const [selectedWeekId, setSelectedWeekId] = useState<string | undefined>(
     resumeTarget?.week.id ?? activeProgram?.weeks[0]?.id,
   );
+
+  const [historyDay, setHistoryDay] = useState<WorkoutDay | null>(null);
 
   const wakeLock = useWakeLock();
 
@@ -200,6 +203,7 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
                 onSelectWeek={setSelectedWeekId}
                 resumeTarget={resumeTarget}
                 onStartWorkout={onStartWorkout}
+                onViewHistory={setHistoryDay}
               />
             ) : (
               <NoProgramState onBack={onBack} />
@@ -218,6 +222,14 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
       <div className="text-center text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest pt-4">
         IronTrack v{__APP_VERSION__}
       </div>
+
+      {historyDay && activeProgram && (
+        <WorkoutHistoryModal
+          day={historyDay}
+          program={activeProgram}
+          onClose={() => setHistoryDay(null)}
+        />
+      )}
     </div>
   );
 }
@@ -236,12 +248,14 @@ function CurrentBlockView({
   onSelectWeek,
   resumeTarget,
   onStartWorkout,
+  onViewHistory,
 }: {
   program: Program;
   selectedWeekId: string | undefined;
   onSelectWeek: (id: string) => void;
   resumeTarget: { week: WorkoutWeek; day: WorkoutDay } | null;
   onStartWorkout: (week: WorkoutWeek, day: WorkoutDay) => void;
+  onViewHistory: (day: WorkoutDay) => void;
 }) {
   const weeks = useMemo(
     () => [...program.weeks].sort((a, b) => a.weekNumber - b.weekNumber),
@@ -424,17 +438,31 @@ function CurrentBlockView({
                         {day.name}
                       </h3>
                     </div>
-                    <div className={cn(
-                      'shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all',
-                      logged
-                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                        : 'bg-muted/40 text-muted-foreground border border-border/40 group-hover:bg-foreground group-hover:text-background group-hover:border-foreground',
-                    )}>
-                      {logged ? (
-                        <CheckCircle2 className="w-4 h-4" />
-                      ) : (
-                        <Play className="w-3.5 h-3.5 ml-0.5" fill="currentColor" />
+                    <div className="flex items-center gap-2 shrink-0">
+                      {logged && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); onViewHistory(day); }}
+                          aria-label={`View session log for ${day.name}`}
+                          data-testid={`view-history-btn-day-${day.dayNumber}`}
+                          className="w-8 h-8 flex items-center justify-center border border-border/50 text-muted-foreground hover:border-foreground hover:text-foreground transition-colors"
+                          title="View session log"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
                       )}
+                      <div className={cn(
+                        'w-9 h-9 rounded-xl flex items-center justify-center transition-all',
+                        logged
+                          ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-muted/40 text-muted-foreground border border-border/40 group-hover:bg-foreground group-hover:text-background group-hover:border-foreground',
+                      )}>
+                        {logged ? (
+                          <CheckCircle2 className="w-4 h-4" />
+                        ) : (
+                          <Play className="w-3.5 h-3.5 ml-0.5" fill="currentColor" />
+                        )}
+                      </div>
                     </div>
                   </div>
 

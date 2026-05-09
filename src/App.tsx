@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { differenceInDays, formatDistanceToNow } from 'date-fns';
 import {
   Dumbbell,
   ShieldCheck,
@@ -47,6 +48,33 @@ import type { Client, WorkoutWeek, WorkoutDay, UserRole } from './types';
 
 // ─── Coach: Client list view ─────────────────────────────────────────────────
 
+/** Compute the most recent loggedAt across all non-archived programs. */
+function getLastLoggedMs(client: Client): number | null {
+  let best: number | null = null;
+  for (const program of client.programs) {
+    if (program.status === 'archived') continue;
+    for (const week of program.weeks) {
+      for (const day of week.days) {
+        if (!day.loggedAt) continue;
+        const ms = new Date(day.loggedAt).getTime();
+        if (best === null || ms > best) best = ms;
+      }
+    }
+  }
+  return best;
+}
+
+function getComplianceInfo(client: Client): { dotClass: string; label: string } {
+  const lastMs = getLastLoggedMs(client);
+  if (lastMs === null) return { dotClass: 'bg-red-500', label: 'No sessions' };
+  const lastDate = new Date(lastMs);
+  const days = differenceInDays(new Date(), lastDate);
+  const label = days === 0 ? 'Today' : formatDistanceToNow(lastDate, { addSuffix: true });
+  if (days <= 3) return { dotClass: 'bg-green-500', label };
+  if (days <= 7) return { dotClass: 'bg-amber-500', label };
+  return { dotClass: 'bg-red-500', label };
+}
+
 function ClientListView({
   clients,
   onSelectClient,
@@ -83,43 +111,49 @@ function ClientListView({
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <AnimatePresence initial={false}>
-          {trainees.map((client, idx) => (
-          <motion.div
-            key={client.id}
-            layout
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ delay: idx * 0.04, duration: 0.25 }}
-          >
-            <TechnicalCard className="group cursor-pointer hover:border-muted-foreground transition-all hover:shadow-xl hover:-translate-y-1">
-              <div onClick={() => onSelectClient(client)} className="p-8">
-                <div className="flex justify-between items-start mb-6">
-                  <div className="w-12 h-12 bg-muted flex items-center justify-center rounded-sm group-hover:bg-foreground group-hover:text-background transition-colors">
-                    <Users className="w-6 h-6" />
+          {trainees.map((client, idx) => {
+            const compliance = getComplianceInfo(client);
+            return (
+              <motion.div
+                key={client.id}
+                layout
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ delay: idx * 0.04, duration: 0.25 }}
+              >
+                <TechnicalCard className="group cursor-pointer hover:border-muted-foreground transition-all hover:shadow-xl hover:-translate-y-1">
+                  <div onClick={() => onSelectClient(client)} className="p-8">
+                    <div className="flex justify-between items-start mb-6">
+                      <div className="w-12 h-12 bg-muted flex items-center justify-center rounded-sm group-hover:bg-foreground group-hover:text-background transition-colors">
+                        <Users className="w-6 h-6" />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${compliance.dotClass}`} />
+                        <div className="text-right">
+                          <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest">Last Trained</p>
+                          <p className="text-[10px] text-foreground font-mono uppercase font-bold">{compliance.label}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <h3 className="text-2xl font-bold text-foreground mb-1 tracking-tight">{client.name}</h3>
+                    <p className="text-xs text-muted-foreground font-mono mb-6">{client.email}</p>
+                    <div className="border-t border-border pt-6 flex justify-between items-center">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest">Program</p>
+                        <p className="text-sm text-foreground font-mono font-medium">
+                          {client.programs[0]?.name ?? 'No Program'}
+                        </p>
+                      </div>
+                      <div className="w-8 h-8 rounded-full border border-border flex items-center justify-center group-hover:bg-foreground group-hover:text-background transition-all">
+                        <ChevronRight className="w-4 h-4" />
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest">Status</p>
-                    <p className="text-[10px] text-green-500 font-mono uppercase font-bold">Active</p>
-                  </div>
-                </div>
-                <h3 className="text-2xl font-bold text-foreground mb-1 tracking-tight">{client.name}</h3>
-                <p className="text-xs text-muted-foreground font-mono mb-6">{client.email}</p>
-                <div className="border-t border-border pt-6 flex justify-between items-center">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest">Program</p>
-                    <p className="text-sm text-foreground font-mono font-medium">
-                      {client.programs[0]?.name ?? 'No Program'}
-                    </p>
-                  </div>
-                  <div className="w-8 h-8 rounded-full border border-border flex items-center justify-center group-hover:bg-foreground group-hover:text-background transition-all">
-                    <ChevronRight className="w-4 h-4" />
-                  </div>
-                </div>
-              </div>
-            </TechnicalCard>
-          </motion.div>
-          ))}
+                </TechnicalCard>
+              </motion.div>
+            );
+          })}
         </AnimatePresence>
       </div>
     </div>
@@ -911,6 +945,7 @@ export default function App() {
     deleteClient,
     createProgram,
     createProgramFromTemplate,
+    duplicateProgram,
     appendClient,
     getClientsForTenant,
   } = useProgramData(authenticatedUser);
@@ -1065,6 +1100,7 @@ export default function App() {
         const program =
           target?.programs.find((p) => p.id === target.activeProgramId && p.status !== 'archived') ??
           target?.programs.find((p) => p.status !== 'archived');
+        if (!program) return; // no restorable program — leave current workout state unchanged
         const week = program?.weeks.find((w) => w.id === s.activeWorkout!.weekId);
         const day = week?.days.find((d) => d.id === s.activeWorkout!.dayId);
         setActiveWorkout(week && day ? { week, day } : null);
@@ -1158,8 +1194,15 @@ export default function App() {
    *  after every keystroke (debounced internally). */
   const handleAutoSaveSession = async (updatedDay: WorkoutDay): Promise<void> => {
     if (!selectedClient || !activeWorkout) return;
+    const programById = selectedClient.programs.find(
+      (p) => p.id === selectedClient.activeProgramId,
+    );
+    // If the active program was archived mid-workout, bail silently — this is
+    // a background autosave and spamming a toast on every keystroke would be
+    // jarring. The user will be informed when they try to finish the session.
+    if (programById?.status === 'archived') return;
     const program =
-      selectedClient.programs.find((p) => p.id === selectedClient.activeProgramId && p.status !== 'archived') ??
+      programById ??
       selectedClient.programs.find((p) => p.status !== 'archived');
     if (!program) return;
     await saveSession(
@@ -1177,8 +1220,18 @@ export default function App() {
    *  of feedback don't compete for attention. */
   const handleFinishSession = async (updatedDay: WorkoutDay): Promise<void> => {
     if (!selectedClient || !activeWorkout) return;
+    const programById = selectedClient.programs.find(
+      (p) => p.id === selectedClient.activeProgramId,
+    );
+    // If the coach archived this program while the trainee was mid-workout,
+    // refuse to save the session so data doesn't get written to an archived
+    // program where it won't appear in analytics.
+    if (programById?.status === 'archived') {
+      setToast('Your program was archived by your coach. Please contact them before continuing.');
+      return;
+    }
     const program =
-      selectedClient.programs.find((p) => p.id === selectedClient.activeProgramId && p.status !== 'archived') ??
+      programById ??
       selectedClient.programs.find((p) => p.status !== 'archived');
     if (!program) return;
     await saveSession(
@@ -1429,6 +1482,7 @@ export default function App() {
           onSaveProgram={saveProgram}
           onCreateProgram={createProgram}
           onCreateProgramFromTemplate={createProgramFromTemplate}
+          onDuplicateProgram={async (clientId, program) => { await duplicateProgram(clientId, program); }}
           onDeleteClient={deleteClient}
           onArchiveProgram={archiveProgram}
           onBack={() => {

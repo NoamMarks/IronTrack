@@ -114,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const name = body.name.trim();
   const email = body.email.trim().toLowerCase();
-  const password = body.password;
+  const password = body.password.trim();
   const tenantId = body.tenantId.trim();
   const inviteCode = normalizeInviteCode(body.inviteCode);
 
@@ -208,6 +208,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         error: upsertErr?.message ?? 'Auth user ready but profile write failed.',
       });
     }
+
+    // Increment use_count now that the signup fully succeeded. Placed after
+    // the profile upsert so a failed signup never burns a use on the code.
+    await supabase
+      .from('invite_codes')
+      .update({ use_count: (invite.use_count ?? 0) + 1 })
+      .eq('code', inviteCode);
 
     return res.status(200).json({ profile });
   } catch (err) {

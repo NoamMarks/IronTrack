@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ProgramEditor } from './ProgramEditor';
 import { RecentActivityPanel } from './RecentActivityPanel';
 import { TemplateBrowser } from './TemplateBrowser';
-import { Modal } from '../ui';
+import { Modal, Toast } from '../ui';
 import { cn } from '../../lib/utils';
 import {
   createInviteCode,
@@ -15,8 +15,21 @@ import {
 import { useTemplates, type ProgramTemplate } from '../../hooks/useTemplates';
 import type { Client, Program, InviteCode, ProgramColumn, WorkoutWeek } from '../../types';
 
-const activeProgramOf = (c: Client | null): Program | null =>
-  c?.programs.find((p) => p.status !== 'archived') ?? null;
+const activeProgramOf = (c: Client | null): Program | null => {
+  if (!c) return null;
+  const active = c.programs.filter((p) => p.status !== 'archived');
+  if (active.length === 0) return null;
+  // Prefer the activeProgramId the server already flagged; fall back to the
+  // most recently created non-archived program so the editor always opens the
+  // one the coach last built rather than a random insertion-order first.
+  const preferred = c.activeProgramId
+    ? active.find((p) => p.id === c.activeProgramId) ?? null
+    : null;
+  if (preferred) return preferred;
+  return active.slice().sort((a, b) =>
+    (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
+  )[0] ?? null;
+};
 
 interface AdminViewProps {
   clients: Client[];
@@ -33,6 +46,7 @@ interface AdminViewProps {
   ) => Promise<Program>;
   onDeleteClient: (clientId: string) => Promise<void>;
   onArchiveProgram: (clientId: string, programId: string) => Promise<void>;
+  onDuplicateProgram?: (clientId: string, program: Program) => Promise<void>;
   onBack: () => void;
 }
 
@@ -45,6 +59,7 @@ export function AdminView({
   onCreateProgramFromTemplate,
   onDeleteClient,
   onArchiveProgram,
+  onDuplicateProgram,
   onBack,
 }: AdminViewProps) {
   // Tenant-scoped trainees only
@@ -206,6 +221,19 @@ export function AdminView({
       setEditingProgram(null);
     } catch (err) {
       console.error('[IronTrack admin] archiveProgram failed', err);
+    }
+  };
+
+  const [dupeToast, setDupeToast] = useState<string | null>(null);
+
+  const handleDuplicateProgram = async () => {
+    if (!selectedClient || !editingProgram || !onDuplicateProgram) return;
+    try {
+      await onDuplicateProgram(selectedClient.id, editingProgram);
+      setDupeToast('Program duplicated successfully');
+      setTimeout(() => setDupeToast(null), 3000);
+    } catch (err) {
+      console.error('[IronTrack admin] duplicateProgram failed', err);
     }
   };
 
@@ -432,7 +460,17 @@ export function AdminView({
         <div className="space-y-6">
           {editingProgram ? (
             <>
-              <div className="flex justify-end">
+              <div className="flex justify-end items-center gap-2">
+                {onDuplicateProgram && (
+                  <button
+                    onClick={() => void handleDuplicateProgram()}
+                    data-testid="duplicate-block-btn"
+                    className="flex items-center gap-2 px-4 py-2 text-[10px] font-mono uppercase tracking-widest border border-border text-muted-foreground hover:bg-foreground hover:text-background transition-all"
+                  >
+                    <Copy className="w-4 h-4" />
+                    Duplicate Block
+                  </button>
+                )}
                 <button
                   onClick={handleArchiveProgram}
                   data-testid="archive-block-btn"
@@ -516,6 +554,7 @@ export function AdminView({
           className="max-h-[60vh] overflow-y-auto pr-1"
         />
       </Modal>
+      <Toast message={dupeToast} onDismiss={() => setDupeToast(null)} />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Edit3, Trash2, X, BookmarkPlus } from 'lucide-react';
+import { Edit3, Trash2, X, BookmarkPlus, ChevronUp, ChevronDown } from 'lucide-react';
 import { TechnicalCard, TechnicalInput } from '../ui';
 import { ColumnModal } from './ColumnModal';
 import { SaveTemplateModal } from './SaveTemplateModal';
@@ -53,12 +53,26 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
   const openAddColumn = () => { setEditingColumn(null); setColumnModalOpen(true); };
   const openEditColumn = (col: ProgramColumn) => { setEditingColumn(col); setColumnModalOpen(true); };
 
+  // Fields that ExercisePlan reads directly by name. A custom column whose
+  // id collides with one of these would be treated as a built-in actual field
+  // by the propagation logic, breaking cross-week sync silently. We suffix
+  // any colliding UUID with '_custom' so the generated id can never be in
+  // this set — the label is unaffected and is what the coach sees in the UI.
+  const RESERVED_COLUMN_IDS = new Set([
+    'sets', 'reps', 'expectedRpe', 'weightRange',
+    'actualLoad', 'actualRpe', 'notes', 'videoUrl',
+  ]);
+
   const handleSaveColumn = (label: string, type: 'plan' | 'actual') => {
     let updated: ProgramColumn[];
     if (editingColumn) {
       updated = allCols.map((c) => c.id === editingColumn.id ? { ...c, label, type } : c);
     } else {
-      const newCol: ProgramColumn = { id: crypto.randomUUID(), label, type };
+      let id = crypto.randomUUID();
+      // UUID v4 never coincidentally matches a plain English word, but guard
+      // defensively so future id-generation strategies can't introduce a collision.
+      if (RESERVED_COLUMN_IDS.has(id)) id = `${id}_custom`;
+      const newCol: ProgramColumn = { id, label, type };
       updated = [...allCols, newCol];
     }
     onChange({ ...program, columns: updated });
@@ -68,10 +82,7 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
   const deleteColumn = (colId: string) => {
     // Strip the column AND any orphaned values keyed by it across every exercise.
     // Without this, deleted custom columns leave ghost data in localStorage forever.
-    const LEGACY_FIELDS = new Set([
-      'sets', 'reps', 'expectedRpe', 'weightRange',
-      'actualLoad', 'actualRpe', 'notes', 'videoUrl',
-    ]);
+    const LEGACY_FIELDS = RESERVED_COLUMN_IDS;
 
     const stripExercise = (ex: ExercisePlan): ExercisePlan => {
       const next: ExercisePlan = { ...ex };
@@ -335,9 +346,32 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
     });
   };
 
+  /** Swap exercise at `fromIdx` with the one at `toIdx` within a specific
+   *  week+day. Unlike add/delete, reordering is intentionally per-day-per-week
+   *  so the coach can tune each week's sequencing independently. */
+  const reorderExercise = (weekId: string, dayId: string, fromIdx: number, toIdx: number) => {
+    onChange({
+      ...program,
+      weeks: program.weeks.map((w) => {
+        if (w.id !== weekId) return w;
+        return {
+          ...w,
+          days: w.days.map((d) => {
+            if (d.id !== dayId) return d;
+            const exercises = [...d.exercises];
+            const [moved] = exercises.splice(fromIdx, 1);
+            exercises.splice(toIdx, 0, moved);
+            return { ...d, exercises };
+          }),
+        };
+      }),
+    });
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────
 
-  const gridTemplate = `minmax(200px, 2fr) ${allCols.map(() => 'minmax(100px, 1fr)').join(' ')} 40px`;
+  // Leading 36px column holds the up/down reorder buttons; trailing 40px holds delete.
+  const gridTemplate = `36px minmax(200px, 2fr) ${allCols.map(() => 'minmax(100px, 1fr)').join(' ')} 40px`;
 
   return (
     <>
@@ -448,6 +482,7 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
                         className="grid gap-4 px-4 text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 pt-6"
                         style={{ gridTemplateColumns: gridTemplate }}
                       >
+                        <span />
                         <span>Exercise Name</span>
                         {allCols.map((col) => (
                           <div
@@ -484,12 +519,31 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
 
                       {/* Exercise rows */}
                       <div className="space-y-2">
-                        {day.exercises.map((ex) => (
+                        {day.exercises.map((ex, exIdx) => (
                           <div
                             key={ex.id}
                             className="grid gap-4 items-center bg-card p-3 border border-border hover:border-muted-foreground transition-all group shadow-sm"
                             style={{ gridTemplateColumns: gridTemplate }}
                           >
+                            {/* Reorder buttons — per-day-per-week, not synced across weeks */}
+                            <div className="flex flex-col items-center justify-center gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() => reorderExercise(week.id, day.id, exIdx, exIdx - 1)}
+                                disabled={exIdx === 0}
+                                className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                              >
+                                <ChevronUp className="w-5 h-5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => reorderExercise(week.id, day.id, exIdx, exIdx + 1)}
+                                disabled={exIdx === day.exercises.length - 1}
+                                className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                              >
+                                <ChevronDown className="w-5 h-5" />
+                              </button>
+                            </div>
                             <ExerciseCombobox
                               value={ex.exerciseName}
                               onChange={(v) => updateExercise(week.id, day.id, ex.id, 'exerciseName', v)}

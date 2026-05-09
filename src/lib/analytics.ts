@@ -1,3 +1,4 @@
+import { format, parseISO } from 'date-fns';
 import type { Client, Program, ExercisePlan } from '../types';
 
 // ─── e1RM (Epley formula) ────────────────────────────────────────────────────
@@ -121,7 +122,7 @@ export function aggregateE1RM(client: Client, exerciseId: string): E1RMPoint[] {
           if (best === null) continue;
 
           points.push({
-            date: day.loggedAt.slice(0, 10),
+            date: format(parseISO(day.loggedAt), 'yyyy-MM-dd'),
             e1rm: best,
             exerciseName: ex.exerciseName,
             programName: program.name,
@@ -167,7 +168,7 @@ export function aggregateVolume(client: Client, exerciseId: string): VolumePoint
           const v = exerciseVolume(ex);
           if (v <= 0) continue;
           points.push({
-            date: day.loggedAt.slice(0, 10),
+            date: format(parseISO(day.loggedAt), 'yyyy-MM-dd'),
             volume: Math.round(v * 10) / 10,
             exerciseName: ex.exerciseName,
             programName: program.name,
@@ -223,7 +224,7 @@ export function personalRecord(client: Client, exerciseId: string): {
             if (best === null || e > best.e1rm) {
               best = {
                 e1rm: e,
-                date: day.loggedAt.slice(0, 10),
+                date: format(parseISO(day.loggedAt), 'yyyy-MM-dd'),
                 load: s.load,
                 reps: s.reps,
               };

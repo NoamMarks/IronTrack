@@ -13,6 +13,7 @@ export interface ActivityEntry {
   programName: string;
   traineeId: string;
   traineeName: string;
+  coachNote: string | null;
 }
 
 interface UseRecentActivityResult {
@@ -59,7 +60,7 @@ export function useRecentActivity(tenantId: string | null | undefined): UseRecen
       const { data: dayRows, error: dayErr } = await supabase
         .from('days')
         .select(`
-          id, name, difficulty, reflection_note, reflection_at, logged_at,
+          id, name, difficulty, reflection_note, reflection_at, logged_at, coach_note,
           weeks!inner (
             programs!inner (
               id, name, tenant_id, client_id
@@ -89,6 +90,7 @@ export function useRecentActivity(tenantId: string | null | undefined): UseRecen
           note: (r.reflection_note as string | null) ?? null,
           reflectionAt: r.reflection_at as string,
           loggedAt: (r.logged_at as string | null) ?? null,
+          coachNote: (r.coach_note as string | null) ?? null,
           programId: (programRel?.id ?? '') as string,
           programName: (programRel?.name ?? '') as string,
           clientId: (programRel?.client_id ?? '') as string,
@@ -115,6 +117,7 @@ export function useRecentActivity(tenantId: string | null | undefined): UseRecen
         note: r.note,
         reflectionAt: r.reflectionAt,
         loggedAt: r.loggedAt,
+        coachNote: r.coachNote,
         programId: r.programId,
         programName: r.programName,
         traineeId: r.clientId,

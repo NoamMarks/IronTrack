@@ -69,6 +69,7 @@ interface DayRow {
   difficulty: number | null;
   reflection_note: string | null;
   reflection_at: string | null;
+  coach_note: string | null;
   exercises?: ExerciseRow[];
 }
 
@@ -119,6 +120,7 @@ function rowToProgram(row: ProgramRow): Program {
           difficulty: d.difficulty ?? undefined,
           reflectionNote: d.reflection_note ?? undefined,
           reflectionAt: d.reflection_at ?? undefined,
+          coachNote: d.coach_note ?? undefined,
           exercises: (d.exercises ?? [])
             .slice()
             .sort((a, b) => a.position - b.position)
@@ -597,6 +599,110 @@ export function useProgramData(authenticatedUser: Client | null) {
   );
 
   /**
+   * Duplicate a live program for the same client, stripping all actuals so
+   * the copy starts as a blank slate ready for the next block. The new
+   * program is named "Copy of …" and does NOT become the active program —
+   * the coach activates it manually once they're satisfied with it.
+   */
+  const duplicateProgram = useCallback(
+    async (clientId: string, program: Program): Promise<Program> => {
+      const programId = crypto.randomUUID();
+      const { data: programData, error: programErr } = await supabase
+        .from('programs')
+        .insert({
+          id: programId,
+          client_id: clientId,
+          tenant_id: tenantId,
+          name: `Copy of ${program.name}`,
+          columns: program.columns,
+          status: 'active',
+        })
+        .select()
+        .single<ProgramRow>();
+      if (programErr || !programData) {
+        throw programErr ?? new Error('duplicateProgram: no data returned');
+      }
+
+      const newWeeks: WorkoutWeek[] = [];
+      const sortedWeeks = [...program.weeks].sort((a, b) => a.weekNumber - b.weekNumber);
+
+      for (const tw of sortedWeeks) {
+        const weekId = crypto.randomUUID();
+        const { error: weekErr } = await supabase
+          .from('weeks')
+          .insert({ id: weekId, program_id: programId, week_number: tw.weekNumber });
+        if (weekErr) throw weekErr;
+
+        const newDays: WorkoutDay[] = [];
+        const sortedDays = [...tw.days].sort((a, b) => a.dayNumber - b.dayNumber);
+
+        for (const td of sortedDays) {
+          const dayId = crypto.randomUUID();
+          const { error: dayErr } = await supabase
+            .from('days')
+            .insert({ id: dayId, week_id: weekId, day_number: td.dayNumber, name: td.name });
+          if (dayErr) throw dayErr;
+
+          const exerciseRows = td.exercises.map((ex, position) => ({
+            id: crypto.randomUUID(),
+            day_id: dayId,
+            position,
+            exercise_id: ex.exerciseId,
+            exercise_name: ex.exerciseName,
+            sets: ex.sets ?? null,
+            reps: ex.reps ?? null,
+            expected_rpe: ex.expectedRpe ?? null,
+            weight_range: ex.weightRange ?? null,
+            // Strip runtime actuals — clean slate for the duplicated block.
+            actual_load: null,
+            actual_rpe: null,
+            notes: null,
+            video_url: null,
+            values: {},
+          }));
+
+          if (exerciseRows.length > 0) {
+            const { data: insertedExercises, error: exErr } = await supabase
+              .from('exercises')
+              .insert(exerciseRows)
+              .select();
+            if (exErr) throw exErr;
+
+            const newExercises: ExercisePlan[] = (insertedExercises ?? [])
+              .slice()
+              .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+              .map(rowToExercise);
+
+            newDays.push({ id: dayId, dayNumber: td.dayNumber, name: td.name, exercises: newExercises });
+          } else {
+            newDays.push({ id: dayId, dayNumber: td.dayNumber, name: td.name, exercises: [] });
+          }
+        }
+
+        newWeeks.push({ id: weekId, weekNumber: tw.weekNumber, days: newDays });
+      }
+
+      const newProgram: Program = {
+        id: programData.id,
+        name: programData.name,
+        columns: programData.columns ?? program.columns,
+        status: programData.status,
+        createdAt: programData.created_at,
+        tenantId: programData.tenant_id ?? undefined,
+        weeks: newWeeks,
+      };
+
+      // Merge into state without changing activeProgramId — the coach
+      // manually activates the duplicate when ready to assign it.
+      setClients((prev) => prev.map((c) =>
+        c.id === clientId ? { ...c, programs: [...c.programs, newProgram] } : c,
+      ));
+      return newProgram;
+    },
+    [tenantId],
+  );
+
+  /**
    * Coach inviting a trainee — creates an invite code in the Supabase
    * invite_codes table. The legacy `addClient` parameters (name, email,
    * password, role) are accepted for callsite compatibility but ONLY tenantId
@@ -648,6 +754,30 @@ export function useProgramData(authenticatedUser: Client | null) {
     });
   }, []);
 
+  const saveCoachNote = useCallback(async (dayId: string, note: string): Promise<void> => {
+    const trimmed = note.trim();
+    const { error } = await supabase
+      .from('days')
+      .update({ coach_note: trimmed || null })
+      .eq('id', dayId);
+    if (error) throw error;
+
+    setClients((prev) =>
+      prev.map((c) => ({
+        ...c,
+        programs: c.programs.map((p) => ({
+          ...p,
+          weeks: p.weeks.map((w) => ({
+            ...w,
+            days: w.days.map((d) =>
+              d.id === dayId ? { ...d, coachNote: trimmed || undefined } : d,
+            ),
+          })),
+        })),
+      })),
+    );
+  }, []);
+
   return {
     clients,
     isLoadingData,
@@ -658,9 +788,11 @@ export function useProgramData(authenticatedUser: Client | null) {
     deleteClient,
     createProgram,
     createProgramFromTemplate,
+    duplicateProgram,
     addClient,
     appendClient,
     getClientsForTenant,
+    saveCoachNote,
   };
 
   // Cross-reference for tests/debugging — these hint variables silence
@@ -685,12 +817,22 @@ async function fetchClientsForUser(user: Client): Promise<Client[]> {
   }
 
   if (user.role === 'admin') {
+    // A coach without a tenantId is a data-integrity problem — the signup
+    // trigger should always set tenant_id = the new user's own id for admin
+    // accounts. Falling back to '' would issue .eq('tenant_id', '') which
+    // matches literal empty-string rows (not NULL rows) and could return
+    // completely unintended data, so we fail loudly instead.
+    if (!user.tenantId) {
+      console.error('[IronTrack fetchClientsForUser] admin user is missing tenantId', user.id);
+      return [user]; // Return at least the coach's own profile so the app stays usable.
+    }
+
     // Coach: fetch every profile in their tenant + every program belonging to
     // those profiles. PostgREST embeds the program tree in a single round-trip.
     const { data: profiles, error: profilesErr } = await supabase
       .from('profiles')
       .select('id, name, email, role, tenant_id, active_program_id')
-      .eq('tenant_id', user.tenantId ?? '');
+      .eq('tenant_id', user.tenantId);
     if (profilesErr) throw profilesErr;
 
     const profileIds = (profiles ?? []).map((p) => p.id);

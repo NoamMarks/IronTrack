@@ -1,8 +1,11 @@
-import { useMemo } from 'react';
-import { Activity, MessageSquare, Radio } from 'lucide-react';
+import { useMemo, useState, useCallback } from 'react';
+import { Activity, MessageSquare, Radio, Pencil, X, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useRecentActivity } from '../../hooks/useRecentActivity';
+import { supabase } from '../../lib/supabase';
+import { useRecentActivity, type ActivityEntry } from '../../hooks/useRecentActivity';
 import { cn } from '../../lib/utils';
+
+const MAX_COACH_NOTE = 300;
 
 interface RecentActivityPanelProps {
   tenantId: string | null | undefined;
@@ -17,12 +20,45 @@ interface RecentActivityPanelProps {
  * a fresh reflection submitted by a trainee animates into the list within
  * a second or so without a manual refresh.
  *
- * The empty state is intentionally explanatory: a coach who's never
- * received a reflection should immediately understand what's supposed to
- * appear here and why it's blank.
+ * Coaches can type a short feedback note directly on each entry; the note
+ * is persisted to `days.coach_note` and displayed read-only in the
+ * trainee's Workout History modal.
  */
 export function RecentActivityPanel({ tenantId, className }: RecentActivityPanelProps) {
   const { entries, isInitialLoad } = useRecentActivity(tenantId);
+
+  // dayId → true when the feedback textarea is expanded for that entry.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // dayId → current draft text while the textarea is open.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // dayId → true while a save is in flight.
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+
+  const openFeedback = useCallback((entry: ActivityEntry) => {
+    setDrafts((d) => ({ ...d, [entry.dayId]: entry.coachNote ?? '' }));
+    setExpanded((e) => ({ ...e, [entry.dayId]: true }));
+  }, []);
+
+  const cancelFeedback = useCallback((dayId: string) => {
+    setExpanded((e) => ({ ...e, [dayId]: false }));
+  }, []);
+
+  const saveFeedback = useCallback(async (dayId: string, note: string) => {
+    setSaving((s) => ({ ...s, [dayId]: true }));
+    try {
+      const trimmed = note.trim();
+      const { error } = await supabase
+        .from('days')
+        .update({ coach_note: trimmed || null })
+        .eq('id', dayId);
+      if (error) throw error;
+      setExpanded((e) => ({ ...e, [dayId]: false }));
+    } catch (err) {
+      console.error('[IronTrack] saveCoachNote failed', err);
+    } finally {
+      setSaving((s) => ({ ...s, [dayId]: false }));
+    }
+  }, []);
 
   return (
     <aside
@@ -49,39 +85,135 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
       ) : (
         <ul className="flex-1 overflow-y-auto divide-y divide-border" data-testid="activity-feed">
           <AnimatePresence initial={false}>
-            {entries.map((entry) => (
-              <motion.li
-                key={entry.dayId}
-                layout
-                initial={{ opacity: 0, x: 12 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -12 }}
-                transition={{ duration: 0.22 }}
-                data-testid={`activity-entry-${entry.dayId}`}
-                className="px-4 py-3 hover:bg-muted/20 transition-colors"
-              >
-                <div className="flex items-start justify-between gap-2 mb-1.5">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-foreground truncate">
-                      {entry.traineeName}
-                    </p>
-                    <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest truncate">
-                      {entry.dayName}
-                    </p>
+            {entries.map((entry) => {
+              const isExpanded = !!expanded[entry.dayId];
+              const draft = drafts[entry.dayId] ?? '';
+              const isSaving = !!saving[entry.dayId];
+
+              return (
+                <motion.li
+                  key={entry.dayId}
+                  layout
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.22 }}
+                  data-testid={`activity-entry-${entry.dayId}`}
+                  className="px-4 py-3 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-foreground truncate">
+                        {entry.traineeName}
+                      </p>
+                      <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest truncate">
+                        {entry.dayName}
+                      </p>
+                    </div>
+                    <DifficultyPill difficulty={entry.difficulty} />
                   </div>
-                  <DifficultyPill difficulty={entry.difficulty} />
-                </div>
-                {entry.note && (
-                  <p className="text-[11px] text-foreground/85 leading-relaxed mt-1.5 flex gap-1.5">
-                    <MessageSquare className="w-3 h-3 mt-0.5 text-muted-foreground shrink-0" />
-                    <span className="break-words">{entry.note}</span>
+
+                  {entry.note && (
+                    <p className="text-[11px] text-foreground/85 leading-relaxed mt-1.5 flex gap-1.5">
+                      <MessageSquare className="w-3 h-3 mt-0.5 text-muted-foreground shrink-0" />
+                      <span className="break-words">{entry.note}</span>
+                    </p>
+                  )}
+
+                  <p className="text-[9px] font-mono text-muted-foreground/60 uppercase tracking-widest mt-2">
+                    {formatRelativeTime(entry.reflectionAt)}
                   </p>
-                )}
-                <p className="text-[9px] font-mono text-muted-foreground/60 uppercase tracking-widest mt-2">
-                  {formatRelativeTime(entry.reflectionAt)}
-                </p>
-              </motion.li>
-            ))}
+
+                  {/* Coach feedback — saved note or expand button */}
+                  {!isExpanded && (
+                    <div className="mt-2">
+                      {entry.coachNote ? (
+                        <div className="flex items-start gap-1.5 border-l-2 border-foreground/20 pl-2">
+                          <p className="text-[10px] font-mono text-foreground/80 leading-relaxed flex-1 break-words">
+                            {entry.coachNote}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => openFeedback(entry)}
+                            aria-label="Edit feedback"
+                            data-testid={`edit-feedback-btn-${entry.dayId}`}
+                            className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openFeedback(entry)}
+                          aria-label="Add feedback"
+                          data-testid={`add-feedback-btn-${entry.dayId}`}
+                          className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <MessageSquare className="w-3 h-3" />
+                          Add feedback
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Inline textarea when expanded */}
+                  <AnimatePresence initial={false}>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="overflow-hidden mt-2"
+                      >
+                        <textarea
+                          value={draft}
+                          onChange={(e) =>
+                            setDrafts((d) => ({
+                              ...d,
+                              [entry.dayId]: e.target.value.slice(0, MAX_COACH_NOTE),
+                            }))
+                          }
+                          rows={2}
+                          maxLength={MAX_COACH_NOTE}
+                          placeholder="Short feedback for the trainee…"
+                          data-testid={`feedback-textarea-${entry.dayId}`}
+                          className="w-full bg-muted/20 border border-border text-[11px] font-mono text-foreground px-2 py-1.5 outline-none focus:border-muted-foreground resize-none placeholder:text-muted-foreground/60"
+                        />
+                        <div className="flex items-center justify-between mt-1">
+                          <span className="text-[9px] font-mono text-muted-foreground/60 tabular-nums">
+                            {draft.length}/{MAX_COACH_NOTE}
+                          </span>
+                          <div className="flex gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => cancelFeedback(entry.dayId)}
+                              aria-label="Cancel"
+                              data-testid={`cancel-feedback-btn-${entry.dayId}`}
+                              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void saveFeedback(entry.dayId, draft)}
+                              disabled={isSaving}
+                              aria-label="Save feedback"
+                              data-testid={`save-feedback-btn-${entry.dayId}`}
+                              className="flex items-center gap-1 px-2 py-1 bg-foreground text-background text-[9px] font-mono uppercase tracking-widest hover:opacity-90 disabled:opacity-40 transition-opacity"
+                            >
+                              <Check className="w-3 h-3" />
+                              {isSaving ? 'Saving' : 'Save'}
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.li>
+              );
+            })}
           </AnimatePresence>
         </ul>
       )}

@@ -277,21 +277,31 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   const impersonate = useCallback((coach: Client) => {
-    setState((prev) => ({
-      ...prev,
-      impersonating: prev.authenticatedUser,
-      authenticatedUser: coach,
-      view: 'coach',
-    }));
+    setState((prev) => {
+      // Guard: if already impersonating, ignore to prevent losing the original
+      // superadmin reference. The caller must stopImpersonating first.
+      if (prev.impersonating !== null) return prev;
+      return {
+        ...prev,
+        impersonating: prev.authenticatedUser,
+        authenticatedUser: coach,
+        view: 'coach',
+      };
+    });
   }, []);
 
   const stopImpersonating = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      authenticatedUser: prev.impersonating,
-      impersonating: null,
-      view: 'superadmin',
-    }));
+    setState((prev) => {
+      // Guard: if not currently impersonating, return unchanged to avoid
+      // setting authenticatedUser to null and crashing the app.
+      if (prev.impersonating === null) return prev;
+      return {
+        ...prev,
+        authenticatedUser: prev.impersonating,
+        impersonating: null,
+        view: 'superadmin',
+      };
+    });
   }, []);
 
   return { ...state, login, logout, setView, impersonate, stopImpersonating };

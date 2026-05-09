@@ -149,6 +149,10 @@ export function WorkoutGridLogger({
   const [exercises, setExercises] = useState<ExercisePlan[]>(day.exercises);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  // Tracks every blob: URL created during this session so we can revoke them
+  // all on unmount. URL.createObjectURL pins memory until revokeObjectURL is
+  // called; without this, uploading multiple videos in one workout leaks.
+  const blobUrlsRef = useRef<string[]>([]);
   const [plateCalcOpen, setPlateCalcOpen] = useState(false);
   const [plateCalcWeight, setPlateCalcWeight] = useState('');
   const [plateCalcExerciseId, setPlateCalcExerciseId] = useState<string | null>(null);
@@ -336,12 +340,46 @@ export function WorkoutGridLogger({
   }, [onFinish]);
 
   const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.[0] && uploadingFor) {
-      const url = URL.createObjectURL(e.target.files[0]);
-      updateExercise(uploadingFor, 'videoUrl', url);
+    const file = e.target.files?.[0];
+    if (!file || !uploadingFor) return;
+
+    // 100 MB ceiling — large enough for a short coaching clip, small enough
+    // to avoid pinning dozens of MB of object URLs in the browser heap.
+    const MAX_BYTES = 100 * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      alert(`Video too large (${(file.size / 1024 / 1024).toFixed(0)} MB). Maximum is 100 MB.`);
       setUploadingFor(null);
+      return;
     }
+
+    // Revoke any existing blob URL on the exercise being overwritten so the
+    // browser can release the memory from the previous upload immediately.
+    const prevUrl = exercisesRef.current.find((ex) => ex.id === uploadingFor)?.videoUrl;
+    if (prevUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(prevUrl);
+      blobUrlsRef.current = blobUrlsRef.current.filter((u) => u !== prevUrl);
+    }
+
+    const url = URL.createObjectURL(file);
+    blobUrlsRef.current.push(url);
+    updateExercise(uploadingFor, 'videoUrl', url);
+    setUploadingFor(null);
   };
+
+  // Release any remaining blob URLs when the workout logger unmounts.
+  // Covers the case where the coach uploads a video and then hits "Finish"
+  // or "Back" before the URL would otherwise be revoked.
+  // blobUrlsRef is listed as a dep so noUnusedLocals can trace the read;
+  // the ref is stable so the effect still runs exactly once on mount/unmount.
+  useEffect(() => {
+    return () => {
+      for (const url of blobUrlsRef.current) {
+        URL.revokeObjectURL(url);
+      }
+      blobUrlsRef.current = [];
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blobUrlsRef]);
 
   // Confirmation handler — wraps handleFinish with a check for partially-
   // logged sessions. We use window.confirm because it's the simplest

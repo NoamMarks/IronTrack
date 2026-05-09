@@ -33,6 +33,9 @@ export interface WorkoutDay {
   reflectionNote?: string;
   /** ISO timestamp the reflection was submitted. */
   reflectionAt?: string;
+  /** Short text response left by the coach after reading the trainee's
+   *  reflection. Displayed read-only in the trainee's Workout History modal. */
+  coachNote?: string;
 }
 
 export interface WorkoutWeek {
