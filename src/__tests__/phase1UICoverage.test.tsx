@@ -228,8 +228,8 @@ describe('Phase 1E: Modal close behaviours', () => {
         <div>body</div>
       </Modal>,
     );
-    // The backdrop is the absolute-positioned div with the bg-background/70 class.
-    const backdrop = container.querySelector('.bg-background\\/70');
+    // The backdrop is the absolute-positioned div with the bg-background/<opacity> class.
+    const backdrop = container.querySelector('[class*="bg-background/"]');
     expect(backdrop).not.toBeNull();
     fireEvent.click(backdrop!);
     expect(onClose).toHaveBeenCalledOnce();
@@ -422,7 +422,8 @@ describe('Phase 1I: PlateCalculator (Modal) close behaviours', () => {
     );
     // Sanity — Modal contents are present
     expect(within(container).getByTestId('plate-stub')).toBeInTheDocument();
-    const backdrop = container.querySelector('.bg-background\\/70');
+    const backdrop = container.querySelector('[class*="bg-background/"]');
+    expect(backdrop).not.toBeNull();
     fireEvent.click(backdrop!);
     expect(onClose).toHaveBeenCalledOnce();
   });

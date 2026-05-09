@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Dumbbell, Sun, Moon, ArrowLeft, MailCheck } from 'lucide-react';
 import { motion } from 'motion/react';
-import { TechnicalCard, TechnicalInput } from '../ui';
+import { TechnicalCard, TechnicalInput, Button } from '../ui';
 import { isValidEmail, INVALID_EMAIL_MESSAGE } from '../../lib/validation';
 import { supabase } from '../../lib/supabase';
 
@@ -91,7 +91,7 @@ export function ForgotPasswordPage({ onBack, theme, onToggleTheme }: ForgotPassw
               <ArrowLeft className="w-4 h-4" /> Back to Login
             </button>
 
-            <h1 className="text-5xl font-bold tracking-tighter uppercase italic font-serif leading-none">
+            <h1 className="text-5xl font-display font-bold tracking-tighter uppercase leading-none">
               Reset Password
             </h1>
             <p className="text-muted-foreground font-mono text-xs mt-3 uppercase tracking-widest">
@@ -123,14 +123,15 @@ export function ForgotPasswordPage({ onBack, theme, onToggleTheme }: ForgotPassw
                       {emailError}
                     </p>
                   )}
-                  <button
+                  <Button
+                    variant="primary"
+                    className="w-full py-3"
                     onClick={() => void handleEmailSubmit()}
                     disabled={!email.trim() || submitting}
                     data-testid="forgot-email-submit"
-                    className="btn-press w-full bg-foreground text-background py-4 text-xs font-bold uppercase tracking-widest rounded-input hover:opacity-90 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {submitting ? 'Sending...' : 'Send Reset Link'}
-                  </button>
+                  </Button>
                 </div>
               </TechnicalCard>
             </motion.div>
@@ -151,13 +152,14 @@ export function ForgotPasswordPage({ onBack, theme, onToggleTheme }: ForgotPassw
                   <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
                     The link expires in 1 hour. Check your spam folder if you don't see it.
                   </p>
-                  <button
+                  <Button
+                    variant="primary"
+                    className="w-full py-3"
                     onClick={onBack}
                     data-testid="forgot-back-to-login"
-                    className="btn-press w-full bg-foreground text-background py-4 text-xs font-bold uppercase tracking-widest rounded-input hover:opacity-90 shadow-lg"
                   >
                     Back to Login
-                  </button>
+                  </Button>
                 </div>
               </TechnicalCard>
             </motion.div>

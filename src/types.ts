@@ -59,6 +59,9 @@ export interface Program {
   createdAt?: string;
   /** Tenant isolation — programs belong to the coach who created them */
   tenantId?: string;
+  /** Coach-authored block notes — goal/methodology/focus points the trainee
+   *  reads before logging. Null/undefined when unset. */
+  coachNotes?: string;
 }
 
 export type UserRole = 'superadmin' | 'admin' | 'trainee';

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Modal, TechnicalInput } from '../ui';
+import { Modal, TechnicalInput, Button } from '../ui';
 import { cn } from '../../lib/utils';
 import type { ProgramColumn } from '../../types';
 
@@ -61,8 +61,8 @@ export function ColumnModal({ isOpen, onClose, editingColumn, onSave }: ColumnMo
               className={cn(
                 'p-4 border text-xs font-bold uppercase tracking-widest transition-all',
                 type === 'plan'
-                  ? 'bg-foreground text-background border-foreground'
-                  : 'border-border hover:border-muted-foreground'
+                  ? 'bg-primary/15 text-primary border-primary shadow-glow-primary'
+                  : 'border-border text-muted-foreground hover:border-primary/50 hover:text-primary'
               )}
             >
               Plan (Coach Sets)
@@ -72,8 +72,8 @@ export function ColumnModal({ isOpen, onClose, editingColumn, onSave }: ColumnMo
               className={cn(
                 'p-4 border text-xs font-bold uppercase tracking-widest transition-all',
                 type === 'actual'
-                  ? 'bg-foreground text-background border-foreground'
-                  : 'border-border hover:border-muted-foreground'
+                  ? 'bg-primary/15 text-primary border-primary shadow-glow-primary'
+                  : 'border-border text-muted-foreground hover:border-primary/50 hover:text-primary'
               )}
             >
               Actual (Trainee Logs)
@@ -81,14 +81,15 @@ export function ColumnModal({ isOpen, onClose, editingColumn, onSave }: ColumnMo
           </div>
         </div>
 
-        <button
+        <Button
+          variant="primary"
+          className="w-full py-4"
           onClick={handleSave}
           disabled={!label.trim()}
           data-testid="save-column-btn"
-          className="btn-press w-full bg-foreground text-background py-4 text-xs font-bold uppercase tracking-widest rounded-input hover:opacity-90 shadow-lg disabled:opacity-40"
         >
           {editingColumn ? 'Save Changes' : 'Create Column'}
-        </button>
+        </Button>
       </div>
     </Modal>
   );

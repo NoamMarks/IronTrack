@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Modal, TechnicalInput } from '../ui';
+import { Modal, Button } from '../ui';
 
 interface SaveTemplateModalProps {
   isOpen: boolean;
@@ -42,6 +42,8 @@ export function SaveTemplateModal({
     }
   }, [isOpen, initialName]);
 
+  const canSave = name.trim().length > 0;
+
   const handleSubmit = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
@@ -69,14 +71,14 @@ export function SaveTemplateModal({
           <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
             Template Name
           </label>
-          <div className="field-wrap">
-            <TechnicalInput
-              value={name}
-              onChange={setName}
-              placeholder="Hypertrophy Block 1"
-              data-testid="save-template-name"
-            />
-          </div>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Hypertrophy Block 1"
+            data-testid="save-template-name"
+            className="w-full bg-surface border-b border-primary/30 p-3 font-mono text-sm text-foreground outline-none focus:border-primary placeholder:text-muted-foreground/40"
+          />
         </div>
 
         <div className="space-y-1.5">
@@ -89,37 +91,37 @@ export function SaveTemplateModal({
             placeholder="4-week mesocycle, push/pull/legs split, 8-12 reps@RPE 7..."
             rows={3}
             data-testid="save-template-description"
-            className="w-full bg-muted/30 border border-border p-3 text-sm font-mono text-foreground outline-none focus:border-muted-foreground resize-none placeholder:text-muted-foreground/60"
+            className="w-full bg-surface border-b border-primary/30 p-3 font-mono text-sm text-foreground outline-none focus:border-primary placeholder:text-muted-foreground/40 resize-none"
           />
-          <p className="text-[9px] font-mono text-muted-foreground/60 text-right tabular-nums">
+          <p className="text-[9px] font-mono text-muted-foreground/50 text-right tabular-nums">
             {description.length} / 300
           </p>
         </div>
 
         {error && (
-          <p className="text-red-500 font-mono text-xs" data-testid="save-template-error">
+          <p className="text-danger font-mono text-xs" data-testid="save-template-error">
             {error}
           </p>
         )}
 
         <div className="flex gap-2">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            className="flex-1 py-3"
             onClick={onClose}
             disabled={submitting}
-            className="flex-1 py-3 text-xs font-bold uppercase tracking-widest border border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground transition-colors disabled:opacity-40"
           >
             Cancel
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="primary"
+            className="flex-[2] py-3"
             onClick={() => void handleSubmit()}
-            disabled={submitting || !name.trim()}
+            disabled={!canSave || submitting}
             data-testid="save-template-submit-btn"
-            className="btn-press flex-[2] py-3 text-xs font-bold uppercase tracking-widest bg-foreground text-background hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting ? 'Saving...' : 'Save Template'}
-          </button>
+          </Button>
         </div>
       </div>
     </Modal>

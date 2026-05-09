@@ -259,5 +259,109 @@ export function exerciseFrequency(client: Client, exerciseId: string): number {
   return count;
 }
 
+export function weeklyVolumeByExercise(
+  program: Program,
+  exerciseId: string
+): { weekNumber: number; volume: number }[] {
+  return program.weeks.map(week => {
+    const vol = week.days
+      .flatMap(d => d.exercises)
+      .filter(ex => ex.exerciseId === exerciseId)
+      .reduce((sum, ex) => sum + exerciseVolume(ex), 0);
+    return { weekNumber: week.weekNumber, volume: vol };
+  });
+}
+
+export function detectDeloadWeek(
+  program: Program,
+  weekNumber: number
+): { exerciseName: string; dropPct: number }[] {
+  const warnings: { exerciseName: string; dropPct: number }[] = [];
+  const currentWeek = program.weeks.find(w => w.weekNumber === weekNumber);
+  const prevWeek = program.weeks.find(w => w.weekNumber === weekNumber - 1);
+  if (!currentWeek || !prevWeek) return [];
+
+  const prevExercises = prevWeek.days.flatMap(d => d.exercises);
+  const currExercises = currentWeek.days.flatMap(d => d.exercises);
+
+  const exerciseIds = [...new Set(prevExercises.map(e => e.exerciseId))];
+
+  for (const id of exerciseIds) {
+    const prevVol = prevExercises.filter(e => e.exerciseId === id).reduce((s, e) => s + exerciseVolume(e), 0);
+    const currVol = currExercises.filter(e => e.exerciseId === id).reduce((s, e) => s + exerciseVolume(e), 0);
+    if (prevVol > 0 && currVol < prevVol * 0.8) {
+      const name = prevExercises.find(e => e.exerciseId === id)?.exerciseName ?? id;
+      const dropPct = Math.round(((prevVol - currVol) / prevVol) * 100);
+      warnings.push({ exerciseName: name, dropPct });
+    }
+  }
+  return warnings;
+}
+
+export function complianceRate(client: Client): { logged: number; total: number; rate: number } {
+  let logged = 0;
+  let total = 0;
+  for (const program of client.programs) {
+    for (const week of program.weeks) {
+      for (const day of week.days) {
+        total++;
+        if (day.loggedAt) logged++;
+      }
+    }
+  }
+  const rate = total === 0 ? 0 : Math.round((logged / total) * 100);
+  return { logged, total, rate };
+}
+
+// ─── Autoregulation ──────────────────────────────────────────────────────────
+
+export type AutoregSuggestion = 'increase' | 'decrease' | 'maintain' | null;
+
+/**
+ * Suggest a load adjustment based on the trainee's recent RPE accuracy on
+ * an exercise. Looks at the last 3 logged sessions across all programs and
+ * compares actual vs. expected RPE.
+ *
+ * Returns null when there's insufficient data (<2 sessions). Otherwise:
+ *   avgDelta > +1.5  → 'decrease' (consistently overshooting target RPE)
+ *   avgDelta < -1.5  → 'increase' (consistently undershooting target RPE)
+ *   otherwise        → 'maintain'
+ */
+export function rpeAutoregulationSuggestion(
+  client: Client,
+  exerciseId: string,
+): { suggestion: AutoregSuggestion; avgDelta: number | null; sessionCount: number } {
+  const sessions: { actualRpe: number; expectedRpe: number }[] = [];
+
+  const allDays = client.programs
+    .flatMap((p) => p.weeks.flatMap((w) => w.days))
+    .filter((d) => d.loggedAt)
+    .sort((a, b) => (b.loggedAt ?? '').localeCompare(a.loggedAt ?? ''));
+
+  for (const day of allDays) {
+    if (sessions.length >= 3) break;
+    const ex = day.exercises.find((e) => e.exerciseId === exerciseId);
+    if (!ex) continue;
+    const actual = parseLoad(ex.actualRpe ?? '');
+    const expected = parseLoad(ex.expectedRpe ?? '');
+    if (actual !== null && expected !== null) {
+      sessions.push({ actualRpe: actual, expectedRpe: expected });
+    }
+  }
+
+  if (sessions.length < 2) {
+    return { suggestion: null, avgDelta: null, sessionCount: sessions.length };
+  }
+
+  const avgDelta = sessions.reduce((s, r) => s + (r.actualRpe - r.expectedRpe), 0) / sessions.length;
+  const rounded = Math.round(avgDelta * 10) / 10;
+
+  let suggestion: AutoregSuggestion = 'maintain';
+  if (avgDelta > 1.5) suggestion = 'decrease';
+  else if (avgDelta < -1.5) suggestion = 'increase';
+
+  return { suggestion, avgDelta: rounded, sessionCount: sessions.length };
+}
+
 /** Cross-reference for `Program` import — keeps the import live for tooling. */
 void ({} as Program);

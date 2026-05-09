@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { ArrowLeft, AlertCircle, Smartphone, Archive, Play, CheckCircle2, Circle, ArrowRight, Bell, BellOff, Video, Eye } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Smartphone, Archive, Play, CheckCircle2, Circle, ArrowRight, Bell, BellOff, Video, Eye, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TechnicalCard } from '../ui';
 import { cn } from '../../lib/utils';
@@ -7,6 +7,8 @@ import { useWakeLock } from '../../hooks/useWakeLock';
 import { hapticNav } from '../../lib/haptics';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { WorkoutHistoryModal } from './WorkoutHistoryModal';
+import { ProgressReport } from './ProgressReport';
+import { detectDeloadWeek } from '../../lib/analytics';
 import type { Client, Program, WorkoutWeek, WorkoutDay } from '../../types';
 
 interface ClientDashboardProps {
@@ -33,6 +35,8 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
   const TABS: Tab[] = ['current', 'history', 'analytics'];
   const [tab, setTab] = useState<Tab>('current');
   const tabIndex = TABS.indexOf(tab);
+
+  const [showReport, setShowReport] = useState(false);
 
   // Smart-resume target: the next workout the trainee should do. Find the
   // first day without a `loggedAt` in the chronologically next week. If
@@ -115,6 +119,15 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowReport(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-border/50 text-muted-foreground hover:border-primary hover:text-primary transition-colors font-mono text-xs uppercase tracking-widest"
+            data-testid="generate-report-btn"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            Report
+          </button>
+
           {/* Notifications permission toggle */}
           {notifPermission !== 'unsupported' && (
             <button
@@ -230,6 +243,10 @@ export function ClientDashboard({ client, onBack, onStartWorkout }: ClientDashbo
           onClose={() => setHistoryDay(null)}
         />
       )}
+
+      {showReport && (
+        <ProgressReport client={client} onClose={() => setShowReport(false)} />
+      )}
     </div>
   );
 }
@@ -265,6 +282,15 @@ function CurrentBlockView({
     () => weeks.find((w) => w.id === selectedWeekId) ?? weeks[0],
     [weeks, selectedWeekId],
   );
+
+  const deloadWarnings = useMemo(() => {
+    const result: Record<string, { exerciseName: string; dropPct: number }[]> = {};
+    for (const week of program.weeks) {
+      const warnings = detectDeloadWeek(program, week.weekNumber);
+      if (warnings.length > 0) result[week.id] = warnings;
+    }
+    return result;
+  }, [program]);
 
   if (!selectedWeek) {
     return (
@@ -330,6 +356,24 @@ function CurrentBlockView({
         </motion.button>
       )}
 
+      {/* ── Coach block notes ───────────────────────────────────────────
+           Read-only context the coach attached to this block — goal,
+           methodology, focus points. Hidden when unset so empty programs
+           don't render an empty panel. */}
+      {program.coachNotes && (
+        <div
+          data-testid="coach-block-notes"
+          className="border border-primary/20 bg-surface/50 p-4 space-y-1"
+        >
+          <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-primary/60">
+            Coach Notes
+          </p>
+          <p className="text-sm font-mono text-foreground/80 leading-relaxed whitespace-pre-wrap">
+            {program.coachNotes}
+          </p>
+        </div>
+      )}
+
       {/* ── Horizontal week pills ─────────────────────────────────────────
            Compact, tap-to-select strip. Each pill shows the week number
            plus a small ✓ when fully logged or "n/m" when in progress. */}
@@ -384,6 +428,14 @@ function CurrentBlockView({
                     </>
                   )}
                 </span>
+                {deloadWarnings[w.id] && (
+                  <span
+                    className="ml-1.5 px-1.5 py-0.5 text-[8px] font-mono uppercase tracking-widest bg-warning/20 text-warning border border-warning/30"
+                    title={`Volume drop: ${deloadWarnings[w.id].map(d => `${d.exerciseName} -${d.dropPct}%`).join(', ')}`}
+                  >
+                    DELOAD
+                  </span>
+                )}
               </button>
             );
           })}

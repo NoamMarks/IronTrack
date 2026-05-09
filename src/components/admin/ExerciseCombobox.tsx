@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, BookmarkPlus, ChevronDown, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { TechnicalInput } from '../ui';
+import { TechnicalInput, Button } from '../ui';
 import { cn } from '../../lib/utils';
 import type { LibraryExercise } from '../../hooks/useExerciseLibrary';
 
@@ -35,24 +35,44 @@ export function ExerciseCombobox({
 }: ExerciseComboboxProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string>('All');
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Close helper — reset category filter alongside the dropdown so a stale
+  // selection doesn't bleed into the next open. Called from click-outside,
+  // option-pick, and any other future close trigger.
+  const closeDropdown = () => {
+    setIsOpen(false);
+    setActiveCategory('All');
+  };
 
   // Close on click outside
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
+        closeDropdown();
       }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
+  // Distinct categories present in the loaded exercises, alphabetised, with
+  // an 'All' bucket prepended so the default state is "no filter". 'All'
+  // sorts to the front naturally because uppercase 'A' precedes any of the
+  // lowercase enum values ('accessory' / 'bench' / etc.) in ASCII order.
+  const categories = useMemo(
+    () => ['All', ...Array.from(new Set(exercises.map((e) => e.category).filter(Boolean)))].sort(),
+    [exercises],
+  );
+
   const filtered = useMemo(() => {
     const q = value.trim().toLowerCase();
-    if (!q) return exercises;
-    return exercises.filter((ex) => ex.name.toLowerCase().includes(q));
-  }, [exercises, value]);
+    return exercises.filter((ex) =>
+      ex.name.toLowerCase().includes(q)
+      && (activeCategory === 'All' || ex.category === activeCategory),
+    );
+  }, [exercises, value, activeCategory]);
 
   const exactMatch = useMemo(() => {
     return exercises.find((ex) => ex.name.toLowerCase() === value.trim().toLowerCase());
@@ -60,7 +80,7 @@ export function ExerciseCombobox({
 
   const handleSelect = (ex: LibraryExercise) => {
     onSelect(ex.name, ex.videoUrl);
-    setIsOpen(false);
+    closeDropdown();
   };
 
   const handleSave = async () => {
@@ -115,6 +135,30 @@ export function ExerciseCombobox({
               <Search className="w-3 h-3 text-muted-foreground/50" />
             </div>
 
+            {/* Category filter — onMouseDown + preventDefault so clicking a
+                pill doesn't blur the input and collapse the dropdown before
+                the click registers. */}
+            {exercises.length > 0 && (
+              <div className="flex flex-wrap gap-1 px-2 pt-2 pb-1 border-b border-border/30">
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onMouseDown={(e) => { e.preventDefault(); setActiveCategory(cat); }}
+                    data-testid={`exercise-combobox-category-${cat}`}
+                    className={cn(
+                      'px-2 py-0.5 text-[10px] font-mono uppercase tracking-widest border transition-colors',
+                      activeCategory === cat
+                        ? 'bg-primary/20 text-primary border-primary/50'
+                        : 'border-border/50 text-muted-foreground hover:border-primary/30 hover:text-primary',
+                    )}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Results */}
             <div className="overflow-y-auto flex-1 custom-scrollbar">
               {filtered.length > 0 ? (
@@ -136,7 +180,7 @@ export function ExerciseCombobox({
                           </p>
                         </div>
                         {exactMatch?.id === ex.id && (
-                          <Check className="w-4 h-4 text-emerald-500" />
+                          <Check className="w-4 h-4 text-accent" />
                         )}
                       </button>
                     </li>
@@ -154,11 +198,12 @@ export function ExerciseCombobox({
             {/* "Save to Library" Footer — only if no exact match exists */}
             {value.trim() && !exactMatch && (
               <div className="p-3 bg-muted/10 border-t border-border">
-                <button
-                  type="button"
+                <Button
+                  variant="primary"
+                  size="sm"
                   onClick={handleSave}
                   disabled={isSaving}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-foreground text-background text-[10px] font-mono font-bold uppercase tracking-widest hover:opacity-90 transition-opacity disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-2"
                 >
                   {isSaving ? (
                     'Saving...'
@@ -168,7 +213,7 @@ export function ExerciseCombobox({
                       Save "{value}" to Library
                     </>
                   )}
-                </button>
+                </Button>
               </div>
             )}
           </motion.div>

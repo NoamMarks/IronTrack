@@ -49,6 +49,7 @@ interface ProgramRow {
   columns: ProgramColumn[] | null;
   status: 'active' | 'archived';
   archived_at: string | null;
+  coach_notes: string | null;
   created_at: string;
   weeks?: WeekRow[];
 }
@@ -135,6 +136,7 @@ function rowToProgram(row: ProgramRow): Program {
     archivedAt: row.archived_at ?? undefined,
     createdAt: row.created_at,
     tenantId: row.tenant_id ?? undefined,
+    coachNotes: row.coach_notes ?? undefined,
     weeks,
   };
 }
@@ -778,6 +780,24 @@ export function useProgramData(authenticatedUser: Client | null) {
     );
   }, []);
 
+  const saveBlockNotes = useCallback(async (programId: string, notes: string): Promise<void> => {
+    const trimmed = notes.trim();
+    const { error } = await supabase
+      .from('programs')
+      .update({ coach_notes: trimmed || null })
+      .eq('id', programId);
+    if (error) throw error;
+
+    setClients((prev) =>
+      prev.map((c) => ({
+        ...c,
+        programs: c.programs.map((p) =>
+          p.id === programId ? { ...p, coachNotes: trimmed || undefined } : p,
+        ),
+      })),
+    );
+  }, []);
+
   return {
     clients,
     isLoadingData,
@@ -793,6 +813,7 @@ export function useProgramData(authenticatedUser: Client | null) {
     appendClient,
     getClientsForTenant,
     saveCoachNote,
+    saveBlockNotes,
   };
 
   // Cross-reference for tests/debugging — these hint variables silence

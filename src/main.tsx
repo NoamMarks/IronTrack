@@ -14,7 +14,7 @@ const Root = window.location.pathname === '/privacy' ? <PrivacyPolicy /> : <App 
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <LazyMotion features={domAnimation} strict>
+    <LazyMotion features={domAnimation}>
       {Root}
     </LazyMotion>
   </React.StrictMode>,

@@ -81,6 +81,7 @@ export interface UseTemplatesReturn {
   isLoading: boolean;
   error: Error | null;
   saveTemplate: (name: string, program: Program, description?: string) => Promise<ProgramTemplate>;
+  editTemplate: (id: string, name: string, description: string) => Promise<void>;
   deleteTemplate: (id: string) => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -151,6 +152,30 @@ export function useTemplates(): UseTemplatesReturn {
     [],
   );
 
+  const editTemplate = useCallback(
+    async (id: string, name: string, description: string): Promise<void> => {
+      const trimmedName = name.trim();
+      if (!trimmedName) return;
+      const trimmedDesc = description.trim();
+      const { error: updateErr } = await supabase
+        .from('program_templates')
+        .update({ name: trimmedName, description: trimmedDesc || null })
+        .eq('id', id);
+      if (updateErr) {
+        console.error('[useTemplates] editTemplate failed', updateErr);
+        throw new Error(updateErr.message);
+      }
+      setTemplates((prev) =>
+        prev.map((t) =>
+          t.id === id
+            ? { ...t, name: trimmedName, description: trimmedDesc || '' }
+            : t,
+        ),
+      );
+    },
+    [],
+  );
+
   const deleteTemplate = useCallback(async (id: string): Promise<void> => {
     const { error: deleteErr } = await supabase
       .from('program_templates')
@@ -168,6 +193,7 @@ export function useTemplates(): UseTemplatesReturn {
     isLoading,
     error,
     saveTemplate,
+    editTemplate,
     deleteTemplate,
     refresh: fetchAll,
   };

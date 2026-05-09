@@ -55,6 +55,10 @@ create table public.profiles (
   -- The trainee's currently-active program (FK is added AFTER programs is
   -- created below, since we need a forward reference).
   active_program_id   uuid,
+  -- Web Push subscription record (PushSubscription.toJSON() — endpoint URL
+  -- + keys.p256dh + keys.auth). Null until the user opts in and the client
+  -- calls subscribeToPush. See 2026-05-09_push_subscriptions migration.
+  push_subscription   jsonb,
   created_at          timestamptz not null default now()
 );
 
@@ -149,6 +153,10 @@ create table public.programs (
   columns       jsonb not null default '[]'::jsonb,
   status        program_status not null default 'active',
   archived_at   timestamptz,
+  -- Free-text block notes — goal/methodology/focus points the coach wants
+  -- the trainee to read before logging. Rendered read-only on the trainee's
+  -- Current Block tab. Null when unset. See 2026-05-09_block_notes migration.
+  coach_notes   text,
   created_at    timestamptz not null default now()
 );
 

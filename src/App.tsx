@@ -31,6 +31,7 @@ import { useDeepLinks } from './hooks/useDeepLinks';
 import { isNative } from './lib/platform';
 import { supabase } from './lib/supabase';
 import { TechnicalCard, TechnicalInput, Modal, Toast, Button } from './components/ui';
+import { AccountSettings } from './components/AccountSettings';
 import { cn } from './lib/utils';
 import { AdminView } from './components/admin/AdminView';
 import { SuperadminView } from './components/admin/SuperadminView';
@@ -45,6 +46,7 @@ import { SignupPage } from './components/auth/SignupPage';
 import { ForgotPasswordPage } from './components/auth/ForgotPasswordPage';
 import { checkPasswordStrength } from './lib/crypto';
 import { isValidEmail, INVALID_EMAIL_MESSAGE } from './lib/validation';
+import { subscribeToPush } from './lib/pushSubscription';
 import type { Client, WorkoutWeek, WorkoutDay, UserRole } from './types';
 
 // ─── Coach: Client list view ─────────────────────────────────────────────────
@@ -880,6 +882,7 @@ function AppShell({
   onStopImpersonating,
   toast,
   onDismissToast,
+  onUpdateUser,
 }: {
   children: React.ReactNode;
   authenticatedUser: Client;
@@ -891,7 +894,9 @@ function AppShell({
   onStopImpersonating?: () => void;
   toast?: string | null;
   onDismissToast?: () => void;
+  onUpdateUser: (patch: Partial<Client>) => void;
 }) {
+  const [showSettings, setShowSettings] = useState(false);
   return (
     <div className="min-h-screen flex flex-col">
       {/* Impersonation banner */}
@@ -916,9 +921,13 @@ function AppShell({
           <span className="text-lg font-bold uppercase tracking-widest font-mono">IronTrack</span>
         </div>
         <div className="flex items-center space-x-4">
-          <span className="text-xs font-mono text-muted-foreground hidden sm:block">
+          <button
+            onClick={() => setShowSettings(true)}
+            className="text-xs font-mono text-muted-foreground hover:text-primary transition-colors hidden sm:block"
+            data-testid="open-settings-btn"
+          >
             {authenticatedUser.name}
-          </span>
+          </button>
           {authenticatedUser.role === 'admin' && (
             <button
               onClick={onGoAdmin}
@@ -950,6 +959,16 @@ function AppShell({
         {children}
       </motion.main>
       <Toast message={toast ?? null} onDismiss={onDismissToast} />
+      {showSettings && authenticatedUser && (
+        <AccountSettings
+          user={authenticatedUser}
+          onClose={() => setShowSettings(false)}
+          onUpdated={(newName) => {
+            onUpdateUser({ name: newName });
+            setShowSettings(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -959,7 +978,7 @@ function AppShell({
 export default function App() {
   // Native deep-link listener — no-op on web.
   useDeepLinks();
-  const { authenticatedUser, view, loginError, isLoading: isAuthLoading, login, logout, setView, impersonating, impersonate, stopImpersonating } = useAuth();
+  const { authenticatedUser, view, loginError, isLoading: isAuthLoading, login, logout, setView, impersonating, impersonate, stopImpersonating, patchAuthenticatedUser } = useAuth();
   const {
     clients,
     isLoadingData,
@@ -971,6 +990,7 @@ export default function App() {
     createProgram,
     createProgramFromTemplate,
     duplicateProgram,
+    saveBlockNotes,
     appendClient,
     getClientsForTenant,
   } = useProgramData(authenticatedUser);
@@ -1371,6 +1391,25 @@ export default function App() {
     }
   }, [authenticatedUser, clients]);
 
+  // Auto-resubscribe trainees to Web Push when they land on their dashboard
+  // and have already granted notification permission. The browser-side
+  // subscription is per-device and non-portable, so re-asking the user to
+  // opt in on each visit would be hostile — when permission is already
+  // 'granted' we silently re-register so the server-side push column stays
+  // in sync (e.g. after a logout/login that wiped the row, or a different
+  // browser the trainee is now using).
+  //
+  // 'denied' / 'default' permission states are intentionally ignored —
+  // calling subscribeToPush would prompt mid-flow, which is a worse UX
+  // than the explicit "Enable Notifications" button on the dashboard.
+  useEffect(() => {
+    if (view !== 'trainee' || !authenticatedUser) return;
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission === 'granted') {
+      subscribeToPush(authenticatedUser.id).catch(console.error);
+    }
+  }, [view, authenticatedUser]);
+
   // Tenant-scoped clients for the current user
   const tenantClients = authenticatedUser ? getClientsForTenant(authenticatedUser) : [];
 
@@ -1434,6 +1473,7 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onLogout={logout}
+        onUpdateUser={patchAuthenticatedUser}
         toast={toast}
         onDismissToast={dismissToast}
         onGoAdmin={() => {}}
@@ -1461,6 +1501,7 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onLogout={logout}
+        onUpdateUser={patchAuthenticatedUser}
         toast={toast}
         onDismissToast={dismissToast}
         onGoAdmin={() => setView('admin')}
@@ -1494,6 +1535,7 @@ export default function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onLogout={logout}
+        onUpdateUser={patchAuthenticatedUser}
         toast={toast}
         onDismissToast={dismissToast}
         onGoAdmin={() => setView('admin')}
@@ -1508,8 +1550,35 @@ export default function App() {
           onCreateProgram={createProgram}
           onCreateProgramFromTemplate={createProgramFromTemplate}
           onDuplicateProgram={async (clientId, program) => { await duplicateProgram(clientId, program); }}
+          onSaveBlockNotes={saveBlockNotes}
           onDeleteClient={deleteClient}
           onArchiveProgram={archiveProgram}
+          onSendNotification={async (clientId, message) => {
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token;
+            if (!token) {
+              setToast('You must be signed in to send notifications.');
+              return;
+            }
+            try {
+              const res = await fetch('/api/send-notification', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ recipientId: clientId, message }),
+              });
+              if (!res.ok) {
+                const payload = await res.json().catch(() => ({} as { error?: string }));
+                throw new Error(payload.error || `Send failed (HTTP ${res.status})`);
+              }
+              setToast('Notification sent');
+            } catch (err) {
+              console.error('[IronTrack] sendNotification failed', err);
+              setToast(err instanceof Error ? err.message : 'Could not send notification.');
+            }
+          }}
           onBack={() => {
             if (impersonating) {
               stopImpersonating();
@@ -1532,6 +1601,7 @@ export default function App() {
           theme={theme}
           onToggleTheme={toggleTheme}
           onLogout={logout}
+          onUpdateUser={patchAuthenticatedUser}
           toast={toast}
           onDismissToast={dismissToast}
           onGoAdmin={() => setView('admin')}
@@ -1580,6 +1650,7 @@ export default function App() {
       theme={theme}
       onToggleTheme={toggleTheme}
       onLogout={logout}
+      onUpdateUser={patchAuthenticatedUser}
       toast={toast}
       onDismissToast={dismissToast}
       onGoAdmin={() => setView('admin')}

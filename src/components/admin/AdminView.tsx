@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Trash2, Archive, Link2, Link as LinkIcon, Copy, Check, Library } from 'lucide-react';
+import { ArrowLeft, Trash2, Archive, Link2, Link as LinkIcon, Copy, Check, Library, Bell, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProgramEditor } from './ProgramEditor';
 import { RecentActivityPanel } from './RecentActivityPanel';
 import { TemplateBrowser } from './TemplateBrowser';
+import { CohortAnalytics } from './CohortAnalytics';
+import { ClientNotes } from './ClientNotes';
+import { BlockNotes } from './BlockNotes';
 import { Modal, Toast, Button } from '../ui';
 import { cn } from '../../lib/utils';
 import {
@@ -47,6 +50,15 @@ interface AdminViewProps {
   onDeleteClient: (clientId: string) => Promise<void>;
   onArchiveProgram: (clientId: string, programId: string) => Promise<void>;
   onDuplicateProgram?: (clientId: string, program: Program) => Promise<void>;
+  /** Send a Web Push notification to a trainee. Wired to the
+   *  /api/send-notification serverless endpoint by App.tsx. Optional so
+   *  builds without VAPID keys (or environments where push isn't
+   *  configured) gracefully omit the Bell affordance. */
+  onSendNotification?: (clientId: string, message: string) => Promise<void>;
+  /** Persist `programs.coach_notes` for the given block. When omitted, the
+   *  BlockNotes editor is hidden — keeps the surface clean in environments
+   *  where the migration hasn't run yet. */
+  onSaveBlockNotes?: (programId: string, notes: string) => Promise<void>;
   onBack: () => void;
 }
 
@@ -60,6 +72,8 @@ export function AdminView({
   onDeleteClient,
   onArchiveProgram,
   onDuplicateProgram,
+  onSendNotification,
+  onSaveBlockNotes,
   onBack,
 }: AdminViewProps) {
   // Tenant-scoped trainees only
@@ -80,9 +94,20 @@ export function AdminView({
     templates,
     isLoading: isTemplatesLoading,
     saveTemplate,
+    editTemplate,
     deleteTemplate,
   } = useTemplates();
   const [loadTemplateOpen, setLoadTemplateOpen] = useState(false);
+
+  // Inline notification composer state — opens beneath the targeted client
+  // button rather than as a modal so the coach keeps spatial context.
+  const [notifyClientId, setNotifyClientId] = useState<string | null>(null);
+  const [notifyDraft, setNotifyDraft] = useState('');
+  const [notifySending, setNotifySending] = useState(false);
+
+  // Cohort-analytics drawer toggle — collapses by default so the editor
+  // keeps its full height when the coach is mid-edit.
+  const [showCohort, setShowCohort] = useState(false);
 
   // Load invite codes
   useEffect(() => {
@@ -305,7 +330,7 @@ export function AdminView({
             <ArrowLeft className="w-8 h-8 text-foreground" />
           </motion.button>
           <div>
-            <h1 className="text-5xl font-bold tracking-tighter uppercase italic font-serif text-foreground">
+            <h1 className="text-5xl font-bold tracking-tighter uppercase font-display text-foreground">
               Admin Panel
             </h1>
             <p className="text-muted-foreground font-mono text-xs mt-1 uppercase tracking-widest">
@@ -431,7 +456,7 @@ export function AdminView({
                 <button
                   onClick={() => handleSelectClient(c)}
                   className={cn(
-                    'w-full text-left p-6 border transition-all rounded-sm pr-12',
+                    'w-full text-left p-6 border transition-all rounded-sm pr-20',
                     selectedClient?.id === c.id
                       ? 'bg-primary/10 text-primary border border-primary shadow-glow-primary scale-[1.02]'
                       : 'border-border hover:border-primary/50 bg-surface/50'
@@ -442,6 +467,26 @@ export function AdminView({
                     {c.email}
                   </p>
                 </button>
+
+                {/* Bell — opens an inline notification composer below this
+                    client. Hidden when the parent didn't wire onSendNotification
+                    (e.g. environments without VAPID keys). */}
+                {onSendNotification && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setNotifyClientId(notifyClientId === c.id ? null : c.id);
+                      setNotifyDraft('');
+                    }}
+                    aria-label={`Notify ${c.name}`}
+                    title="Send push notification"
+                    data-testid={`notify-trigger-${c.id}`}
+                    className="absolute top-3 right-10 p-1.5 text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    <Bell className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
                 {/* Reset-password is unavailable in Phase 3 (would need a server-side
                     Supabase admin function). Trainees self-serve via Forgot Password. */}
                 <button
@@ -451,9 +496,65 @@ export function AdminView({
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
+
+                {notifyClientId === c.id && onSendNotification && (
+                  <div
+                    className="mt-2 p-3 bg-surface border border-primary/20 space-y-2"
+                    data-testid={`notify-composer-${c.id}`}
+                  >
+                    <textarea
+                      value={notifyDraft}
+                      onChange={(e) => setNotifyDraft(e.target.value.slice(0, 140))}
+                      placeholder="Message to trainee..."
+                      rows={2}
+                      data-testid={`notify-textarea-${c.id}`}
+                      className="w-full bg-transparent border-b border-primary/30 focus:border-primary text-xs font-mono text-foreground outline-none resize-none placeholder:text-muted-foreground/40"
+                    />
+                    <div className="flex gap-2 justify-end items-center">
+                      <span className="text-[9px] font-mono text-muted-foreground/60 tabular-nums mr-auto">
+                        {notifyDraft.length}/140
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { setNotifyClientId(null); setNotifyDraft(''); }}
+                        disabled={notifySending}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={!notifyDraft.trim() || notifySending}
+                        data-testid={`notify-send-btn-${c.id}`}
+                        onClick={async () => {
+                          setNotifySending(true);
+                          try {
+                            await onSendNotification(c.id, notifyDraft.trim());
+                            setNotifyClientId(null);
+                            setNotifyDraft('');
+                          } finally {
+                            setNotifySending(false);
+                          }
+                        }}
+                      >
+                        <Bell className="w-3 h-3 mr-1" />
+                        {notifySending ? 'Sending' : 'Send'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
+          {selectedClient && (
+            <div className="mt-4 pt-4 border-t border-primary/15">
+              <ClientNotes
+                clientId={selectedClient.id}
+                coachId={authenticatedUser.id}
+              />
+            </div>
+          )}
         </div>
 
         {/* Program editor */}
@@ -461,6 +562,15 @@ export function AdminView({
           {editingProgram ? (
             <>
               <div className="flex justify-end items-center gap-2">
+                <Button
+                  variant={showCohort ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setShowCohort((v) => !v)}
+                  data-testid="cohort-analytics-btn"
+                >
+                  <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
+                  {showCohort ? 'Hide Cohort' : 'Cohort View'}
+                </Button>
                 {onDuplicateProgram && (
                   <Button
                     variant="ghost"
@@ -482,6 +592,26 @@ export function AdminView({
                   Archive Block
                 </Button>
               </div>
+
+              <AnimatePresence>
+                {showCohort && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.2 }}
+                    className="mt-4"
+                  >
+                    <CohortAnalytics trainees={trainees} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              {onSaveBlockNotes && (
+                <BlockNotes
+                  program={editingProgram}
+                  onSave={async (notes) => { await onSaveBlockNotes(editingProgram.id, notes); }}
+                />
+              )}
               <ProgramEditor
                 program={editingProgram}
                 onChange={handleProgramChange}
@@ -552,6 +682,7 @@ export function AdminView({
           templates={templates}
           isLoading={isTemplatesLoading}
           onLoad={handleLoadTemplate}
+          onEdit={editTemplate}
           onDelete={async (t) => { await deleteTemplate(t.id); }}
           className="max-h-[60vh] overflow-y-auto pr-1"
         />

@@ -28,6 +28,7 @@ import {
   getPreviousSetLoad,
   getPreviousSetRpe,
 } from '../../lib/progressiveOverload';
+import { rpeAutoregulationSuggestion } from '../../lib/analytics';
 import type { Client, Program, WorkoutWeek, WorkoutDay, ExercisePlan, ProgramColumn } from '../../types';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -484,6 +485,10 @@ export function WorkoutGridLogger({
           );
           const isLiteralLastWeek =
             prevSession !== null && prevSession.fromWeekNumber === week.weekNumber - 1;
+          // RPE autoregulation: scan the trainee's last 3 logged sessions on
+          // this exercise and suggest a load nudge when actual RPE has been
+          // drifting from prescribed.
+          const autoreg = rpeAutoregulationSuggestion(client, ex.exerciseId);
 
           return (
             <motion.section
@@ -569,7 +574,7 @@ export function WorkoutGridLogger({
                       target="_blank"
                       rel="noreferrer"
                       aria-label="Play video"
-                      className="w-10 h-10 flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500 hover:text-white hover:border-blue-500 transition-all"
+                      className="w-10 h-10 flex items-center justify-center bg-primary/10 text-primary border border-primary/20 hover:bg-primary/10 hover:text-white hover:border-primary transition-all"
                     >
                       <Play className="w-4 h-4" />
                     </a>
@@ -584,6 +589,32 @@ export function WorkoutGridLogger({
                   )}
                 </div>
               </header>
+
+              {/* RPE autoregulation suggestion — only surfaces when there's
+                  enough data and the trend is meaningfully off-target. */}
+              {autoreg.suggestion !== null && autoreg.suggestion !== 'maintain' && (
+                <div
+                  data-testid={`autoreg-banner-${idx}`}
+                  className={cn(
+                    'flex items-center gap-2 px-4 py-2 border-b text-[10px] font-mono uppercase tracking-widest',
+                    autoreg.suggestion === 'increase'
+                      ? 'bg-accent/5 border-accent/20 text-accent'
+                      : 'bg-warning/5 border-warning/20 text-warning',
+                  )}
+                >
+                  {autoreg.suggestion === 'increase'
+                    ? <TrendingUp className="w-3 h-3 shrink-0" />
+                    : <TrendingDown className="w-3 h-3 shrink-0" />
+                  }
+                  <span>
+                    {autoreg.suggestion === 'increase'
+                      ? `Avg RPE ${autoreg.avgDelta !== null ? Math.abs(autoreg.avgDelta) : ''}pts below target — consider adding load`
+                      : `Avg RPE ${autoreg.avgDelta !== null ? autoreg.avgDelta : ''}pts above target — consider reducing load`
+                    }
+                  </span>
+                  <span className="ml-auto opacity-50">({autoreg.sessionCount} sessions)</span>
+                </div>
+              )}
 
               {/* Set rows */}
               <div className="divide-y divide-border/30">
@@ -616,7 +647,7 @@ export function WorkoutGridLogger({
                       className={cn(
                         'flex flex-col gap-1 px-3 md:px-4 py-2.5 md:py-3 transition-colors',
                         setDone
-                          ? 'bg-emerald-500/[0.07]'
+                          ? 'bg-accent/[0.07]'
                           : 'hover:bg-white/[0.02]',
                       )}
                     >

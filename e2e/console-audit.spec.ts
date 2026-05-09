@@ -17,6 +17,10 @@ const NOISE_PATTERNS: RegExp[] = [
   /\[vite\]/i,
   // motion library sometimes warns about layout transforms in test env
   /Please ensure that the container has a non-static position/i,
+  // motion v11 LazyMotion strict-mode tree-shaking advisory. Fires once per
+  // motion.<X> usage in dev; harmless in tests because the components still
+  // animate correctly.
+  /You have rendered a `motion` component within a `LazyMotion` component/i,
 ];
 
 interface ConsoleHit {
@@ -115,12 +119,18 @@ test.describe('Console audit — pre-auth walk', () => {
   test('walking landing → signup → forgot → back stays console-clean', async ({ page }) => {
     const hits = attachConsoleSpy(page);
     await page.goto('/');
+    // The FUI upgrade tucked the login form behind an open-login CTA.
+    await expect(page.getByTestId('open-login-btn')).toBeVisible();
+    await page.getByTestId('open-login-btn').click();
     await expect(page.getByTestId('login-btn')).toBeVisible();
 
     await page.getByTestId('goto-signup-btn').click();
     await expect(page.getByTestId('signup-name')).toBeVisible();
     await page.getByText(/Back to Login/i).click();
 
+    // After returning, the modal is closed; re-open it to reach the
+    // "Forgot Password" affordance.
+    await page.getByTestId('open-login-btn').click();
     await page.getByTestId('goto-forgot-btn').click();
     await expect(page.getByTestId('forgot-email')).toBeVisible();
     await page.getByTestId('forgot-back-btn').click();

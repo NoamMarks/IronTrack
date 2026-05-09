@@ -25,6 +25,10 @@ interface UseAuthReturn extends AuthState {
   setView: (view: AppView) => void;
   impersonate: (coach: Client) => void;
   stopImpersonating: () => void;
+  /** Merge a partial Client into authenticatedUser. Used by AccountSettings
+   *  after a successful DB write so local state reflects the saved value
+   *  without a re-fetch round-trip. No-op when not signed in. */
+  patchAuthenticatedUser: (patch: Partial<Client>) => void;
 }
 
 function viewForRole(role: Client['role']): AppView {
@@ -304,5 +308,13 @@ export function useAuth(): UseAuthReturn {
     });
   }, []);
 
-  return { ...state, login, logout, setView, impersonate, stopImpersonating };
+  const patchAuthenticatedUser = useCallback((patch: Partial<Client>) => {
+    setState((prev) =>
+      prev.authenticatedUser
+        ? { ...prev, authenticatedUser: { ...prev.authenticatedUser, ...patch } }
+        : prev,
+    );
+  }, []);
+
+  return { ...state, login, logout, setView, impersonate, stopImpersonating, patchAuthenticatedUser };
 }

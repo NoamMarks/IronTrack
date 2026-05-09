@@ -25,15 +25,44 @@ vi.mock('../lib/inviteCodes', () => ({
   normalizeInviteCode: (s: string) => s.replace(/\s+/g, '').toUpperCase(),
 }));
 
-// Capture the OTP that gets "sent"
-let capturedOtp = '';
+// Phase-3: signup OTP delivery moved to Supabase Auth (signInWithOtp +
+// verifyOtp). The test simulates a known correct OTP locally so we can
+// validate UX branches without a network round-trip.
+const KNOWN_OTP = '123456';
+const capturedOtp = KNOWN_OTP;
 vi.mock('../lib/verification', () => ({
-  generateOTP: () => {
-    capturedOtp = '123456';
-    return '123456';
-  },
-  sendVerificationEmail: vi.fn(),
+  sendSupabaseOTP: vi.fn().mockResolvedValue(undefined),
 }));
+
+// Override the global supabase stub for this file so verifyOtp / updateUser
+// reflect the Supabase-driven OTP flow used by SignupPage.
+vi.mock('../lib/supabase', () => {
+  const verifyOtp = vi.fn(({ token }: { token: string }) =>
+    Promise.resolve({
+      data: { user: null, session: null },
+      error: token === KNOWN_OTP ? null : { message: 'Incorrect verification code. Please try again.' },
+    }),
+  );
+  const updateUser = vi.fn().mockResolvedValue({ data: { user: null }, error: null });
+  return {
+    supabase: {
+      auth: {
+        verifyOtp,
+        updateUser,
+        getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
+        onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+        signInWithPassword: vi.fn().mockResolvedValue({ data: { user: null, session: null }, error: null }),
+        signInWithOtp: vi.fn().mockResolvedValue({ data: { user: null, session: null }, error: null }),
+        signOut: vi.fn().mockResolvedValue({ error: null }),
+      },
+      from: vi.fn(() => ({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: null, error: null }),
+      })),
+    },
+  };
+});
 
 describe('Verified Signup Flow', () => {
   const onComplete = vi.fn().mockResolvedValue(undefined);
@@ -41,7 +70,6 @@ describe('Verified Signup Flow', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    capturedOtp = '';
   });
 
   function fillForm(inviteCode = 'VALID123') {

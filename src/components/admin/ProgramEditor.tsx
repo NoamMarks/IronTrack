@@ -40,6 +40,10 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
   const [columnModalOpen, setColumnModalOpen] = useState(false);
   const [editingColumn, setEditingColumn] = useState<ProgramColumn | null>(null);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+  // Batch-import panel state — at most one day can show the textarea at a
+  // time, so a single id selector is enough rather than a per-day map.
+  const [batchImportDayId, setBatchImportDayId] = useState<string | null>(null);
+  const [batchDraft, setBatchDraft] = useState('');
 
   // Coach exercise library — globals + the coach's own additions. Mounted
   // here so the Combo Box in every row reads from one shared, cached list
@@ -368,6 +372,30 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
     });
   };
 
+  /** Day reordering swaps `dayNumber` between two days *across every week*.
+   *  `dayNumber` is the structural identity used to align Day-N across weeks
+   *  (analytics, smart-resume, history modal all key off it), so swapping
+   *  only inside the visible week would scramble that alignment. We swap the
+   *  day records AND their `dayNumber` values in lockstep so the slot a
+   *  given day occupied keeps its number — only the contents move. */
+  const reorderDay = (fromDayNumber: number, toDayNumber: number) => {
+    onChange({
+      ...program,
+      weeks: program.weeks.map((w) => {
+        const days = [...w.days];
+        const fromIdx = days.findIndex((d) => d.dayNumber === fromDayNumber);
+        const toIdx = days.findIndex((d) => d.dayNumber === toDayNumber);
+        if (fromIdx === -1 || toIdx === -1) return w;
+        const updatedDays = days.map((d, i) => {
+          if (i === fromIdx) return { ...days[toIdx], dayNumber: fromDayNumber };
+          if (i === toIdx) return { ...days[fromIdx], dayNumber: toDayNumber };
+          return d;
+        });
+        return { ...w, days: updatedDays };
+      }),
+    });
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────
 
   // Leading 36px column holds the up/down reorder buttons; trailing 40px holds delete.
@@ -432,7 +460,16 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
 
             {/* Days */}
             <div className="space-y-12">
-              {week.days.map((day) => (
+              {week.days.map((day) => {
+                // Position lookup is per-render: the sorted index drives the
+                // up/down disabled state so the first/last days can't move
+                // past their bounds.
+                const sortedDays = [...week.days].sort((a, b) => a.dayNumber - b.dayNumber);
+                const dayIdx = sortedDays.findIndex((d) => d.dayNumber === day.dayNumber);
+                const isFirst = dayIdx === 0;
+                const isLast = dayIdx === sortedDays.length - 1;
+
+                return (
                 <div key={day.id} className="space-y-6 bg-surface/30 p-6 border border-border/40">
                   {/* Day header */}
                   <div className="flex justify-between items-center">
@@ -452,9 +489,34 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
                       />
                     </div>
                     <div className="flex items-center space-x-4">
+                      <button
+                        onClick={() => !isFirst && reorderDay(day.dayNumber, sortedDays[dayIdx - 1].dayNumber)}
+                        disabled={isFirst}
+                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                        title="Move day up"
+                        data-testid={`day-up-btn-${day.dayNumber}`}
+                      >
+                        <ChevronUp className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => !isLast && reorderDay(day.dayNumber, sortedDays[dayIdx + 1].dayNumber)}
+                        disabled={isLast}
+                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                        title="Move day down"
+                        data-testid={`day-down-btn-${day.dayNumber}`}
+                      >
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
                       <Button variant="ghost" size="sm" onClick={() => addExercise(week.id, day.id)}>
                         + Exercise
                       </Button>
+                      <button
+                        onClick={() => { setBatchImportDayId(day.id); setBatchDraft(''); }}
+                        className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors"
+                        data-testid={`batch-import-btn-${day.id}`}
+                      >
+                        + Batch
+                      </button>
                       <button
                         onClick={() => deleteDay(week.id, day.id)}
                         className="text-muted-foreground hover:text-red-500"
@@ -463,6 +525,94 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
                       </button>
                     </div>
                   </div>
+
+                  {/* Batch-import panel — paste a newline-separated list of
+                      exercise names. The submit handler propagates each one
+                      across every week's matching day (same as addExercise),
+                      regenerating ids per week so DB rows don't collide. */}
+                  {batchImportDayId === day.id && (() => {
+                    const parsedNames = batchDraft
+                      .split('\n')
+                      .map((n) => n.trim())
+                      .filter((n) => n.length > 0);
+                    return (
+                      <div
+                        className="mx-4 mb-4 p-4 bg-surface border border-primary/20 space-y-3"
+                        data-testid={`batch-import-panel-${day.id}`}
+                      >
+                        <p className="text-[10px] font-mono uppercase tracking-widest text-primary/60">
+                          Paste exercise names — one per line
+                        </p>
+                        <textarea
+                          value={batchDraft}
+                          onChange={(e) => setBatchDraft(e.target.value)}
+                          placeholder={'Back Squat\nRomanian Deadlift\nLeg Press'}
+                          rows={5}
+                          className="w-full bg-transparent border-b border-primary/30 focus:border-primary p-2 font-mono text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground/30 transition-colors"
+                          autoFocus
+                        />
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setBatchImportDayId(null)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            disabled={parsedNames.length === 0}
+                            data-testid="batch-import-confirm"
+                            onClick={() => {
+                              if (parsedNames.length === 0) return;
+                              const newExercises = parsedNames.map((name) => ({
+                                id: crypto.randomUUID(),
+                                exerciseId: name.toLowerCase().replace(/\s+/g, '_'),
+                                exerciseName: name,
+                                sets: 3,
+                                reps: '',
+                                expectedRpe: '',
+                                weightRange: '',
+                                actualLoad: '',
+                                actualRpe: '',
+                                notes: '',
+                                videoUrl: '',
+                                values: {} as Record<string, string>,
+                              }));
+                              onChange({
+                                ...program,
+                                weeks: program.weeks.map((w) => ({
+                                  ...w,
+                                  // Match by dayNumber so the import lands at
+                                  // the same slot in every week — mirroring
+                                  // the cross-week behaviour of addExercise.
+                                  days: w.days.map((d) =>
+                                    d.dayNumber === day.dayNumber
+                                      ? {
+                                          ...d,
+                                          exercises: [
+                                            ...d.exercises,
+                                            ...newExercises.map((ex) => ({
+                                              ...ex,
+                                              id: crypto.randomUUID(),
+                                            })),
+                                          ],
+                                        }
+                                      : d,
+                                  ),
+                                })),
+                              });
+                              setBatchImportDayId(null);
+                              setBatchDraft('');
+                            }}
+                          >
+                            Add {parsedNames.length} Exercise{parsedNames.length !== 1 ? 's' : ''}
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Exercise grid */}
                   <div className="overflow-x-auto pb-4">
@@ -611,7 +761,8 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </TechnicalCard>
         ))}

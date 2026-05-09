@@ -18,8 +18,10 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  ReferenceLine,
 } from 'recharts';
-import { TechnicalCard } from '../ui';
+import { TechnicalCard, Button } from '../ui';
+import { BodyWeightLog } from './BodyWeightLog';
 import { cn } from '../../lib/utils';
 import {
   aggregateE1RM,
@@ -28,6 +30,7 @@ import {
   personalRecord,
 } from '../../lib/analytics';
 import { calculatePoints, strengthTier, type Gender } from '../../lib/formulas';
+import { supabase } from '../../lib/supabase';
 import type { Client } from '../../types';
 
 interface AnalyticsDashboardProps {
@@ -114,6 +117,51 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
   useEffect(() => {
     saveDotsPrefs(dotsPrefs);
   }, [dotsPrefs]);
+
+  // ─── Exercise goals ─────────────────────────────────────────────────────
+  // Per-exercise target e1RM, surfaced as a horizontal reference line on the
+  // e1RM chart. Loaded once per client and kept in a flat
+  // exerciseId → kg lookup so the chart can read it in O(1).
+  const [goals, setGoals] = useState<Record<string, number>>({});
+  const [goalInput, setGoalInput] = useState('');
+  const [savingGoal, setSavingGoal] = useState(false);
+
+  useEffect(() => {
+    void supabase
+      .from('exercise_goals')
+      .select('exercise_id, target_e1rm')
+      .eq('client_id', client.id)
+      .then(({ data }) => {
+        if (data) {
+          setGoals(
+            Object.fromEntries(
+              data.map((g) => [g.exercise_id as string, Number(g.target_e1rm)]),
+            ),
+          );
+        }
+      });
+  }, [client.id]);
+
+  // Reset the input when the user switches exercises so a half-typed value
+  // for one lift doesn't bleed across to another.
+  useEffect(() => { setGoalInput(''); }, [selectedExerciseId]);
+
+  const saveGoal = async (exerciseId: string, value: number) => {
+    setSavingGoal(true);
+    try {
+      const { error } = await supabase.from('exercise_goals').upsert({
+        client_id: client.id,
+        exercise_id: exerciseId,
+        target_e1rm: value,
+      }, { onConflict: 'client_id,exercise_id' });
+      if (error) throw error;
+      setGoals((prev) => ({ ...prev, [exerciseId]: value }));
+    } catch (err) {
+      console.error('[IronTrack] saveGoal failed', err);
+    } finally {
+      setSavingGoal(false);
+    }
+  };
 
   // Derive a DOTS-scored series from the e1RM trend. We treat the trainee's
   // current bodyweight as constant across history — it's an approximation,
@@ -298,6 +346,13 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
             </div>
           )}
 
+          {view === 'dots' && (
+            <div className="mt-4">
+              <p className="text-[10px] font-mono uppercase tracking-[0.2em] text-primary/60 mb-2">Weight History</p>
+              <BodyWeightLog clientId={client.id} />
+            </div>
+          )}
+
           {/* Stat strip — adapts per view */}
           {activeData.length > 0 && stats.kind === 'e1rm' && (
             <div data-testid="e1rm-stat-strip" className="grid grid-cols-3 gap-3">
@@ -395,6 +450,51 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
             </div>
           )}
 
+          {/* Goal-setting row — only meaningful in the e1RM view, and only
+              when the trainee has picked an exercise (otherwise saveGoal
+              has nothing to scope to). */}
+          {view === 'e1rm' && selectedExerciseId && (
+            <div className="flex items-center gap-3 py-3 border-y border-primary/15">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground shrink-0">
+                Target e1RM
+              </span>
+              <div className="flex items-center gap-2 flex-1">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={goalInput || (goals[selectedExerciseId] ? String(goals[selectedExerciseId]) : '')}
+                  onChange={(e) => setGoalInput(e.target.value.replace(/[^0-9.]/g, ''))}
+                  placeholder="Set goal (kg)"
+                  data-testid="goal-input"
+                  className="w-32 bg-surface border-b border-primary/30 focus:border-primary p-2 font-mono text-sm text-foreground outline-none"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!goalInput || savingGoal}
+                  data-testid="goal-save-btn"
+                  onClick={() => {
+                    const v = parseFloat(goalInput);
+                    if (v > 0) {
+                      void saveGoal(selectedExerciseId, v);
+                      setGoalInput('');
+                    }
+                  }}
+                >
+                  {savingGoal ? 'Saving…' : 'Set Goal'}
+                </Button>
+                {goals[selectedExerciseId] && (
+                  <span
+                    data-testid="goal-current"
+                    className="text-[10px] font-mono text-primary/70 uppercase tracking-widest"
+                  >
+                    Current goal: {goals[selectedExerciseId]} kg
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Chart */}
           {activeData.length === 0 ? (
             <EmptyChart
@@ -411,7 +511,7 @@ export function AnalyticsDashboard({ client }: AnalyticsDashboardProps) {
           ) : view === 'dots' ? (
             <DotsChart data={dotsData} />
           ) : (
-            <E1rmChart data={e1rmData} />
+            <E1rmChart data={e1rmData} goalE1rm={goals[selectedExerciseId]} />
           )}
         </div>
       </TechnicalCard>
@@ -430,7 +530,13 @@ const TOOLTIP_STYLE = {
   color: '#E2F4FF',
 } as const;
 
-function E1rmChart({ data }: { data: ReturnType<typeof aggregateE1RM> }) {
+function E1rmChart({
+  data,
+  goalE1rm,
+}: {
+  data: ReturnType<typeof aggregateE1RM>;
+  goalE1rm?: number;
+}) {
   return (
     <div className="h-72" data-testid="e1rm-chart">
       <ResponsiveContainer width="100%" height="100%">
@@ -455,6 +561,21 @@ function E1rmChart({ data }: { data: ReturnType<typeof aggregateE1RM> }) {
             dot={{ fill: '#00FF88', r: 4 }}
             activeDot={{ r: 6 }}
           />
+          {goalE1rm && (
+            <ReferenceLine
+              y={goalE1rm}
+              stroke="rgba(0,255,136,0.6)"
+              strokeDasharray="4 4"
+              strokeWidth={1.5}
+              label={{
+                value: `Goal ${goalE1rm}kg`,
+                position: 'insideTopRight',
+                fontSize: 10,
+                fontFamily: 'monospace',
+                fill: 'rgba(0,255,136,0.7)',
+              }}
+            />
+          )}
         </AreaChart>
       </ResponsiveContainer>
     </div>
