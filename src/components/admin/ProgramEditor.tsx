@@ -1,5 +1,30 @@
 import { useState } from 'react';
-import { Edit3, Trash2, X, BookmarkPlus, ChevronUp, ChevronDown } from 'lucide-react';
+import {
+  Edit3,
+  Trash2,
+  X,
+  BookmarkPlus,
+  ChevronUp,
+  ChevronDown,
+  GripVertical,
+} from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { TechnicalCard, TechnicalInput, Button } from '../ui';
 import { ColumnModal } from './ColumnModal';
 import { SaveTemplateModal } from './SaveTemplateModal';
@@ -8,7 +33,7 @@ import { cn } from '../../lib/utils';
 import { DEFAULT_COLUMNS } from '../../constants/mockData';
 import { sanitizeOnType, clampOnCommit, kindForColumnId, RANGES } from '../../lib/numericInput';
 import { useExerciseLibrary } from '../../hooks/useExerciseLibrary';
-import type { Program, ProgramColumn, ExercisePlan } from '../../types';
+import type { Program, ProgramColumn, ExercisePlan, WorkoutWeek, WorkoutDay } from '../../types';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -44,13 +69,50 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
   // time, so a single id selector is enough rather than a per-day map.
   const [batchImportDayId, setBatchImportDayId] = useState<string | null>(null);
   const [batchDraft, setBatchDraft] = useState('');
+  // Drag-driven save indicator. Keyed on the day where the drop landed so
+  // only that day's header flashes the badge — avoids "Saving..." appearing
+  // on every visible day at once.
+  const [saveStatus, setSaveStatus] = useState<{
+    dayId: string | null;
+    status: 'idle' | 'saving' | 'saved';
+  }>({ dayId: null, status: 'idle' });
 
   // Coach exercise library — globals + the coach's own additions. Mounted
   // here so the Combo Box in every row reads from one shared, cached list
   // rather than each input issuing its own fetch.
   const { exercises: libraryExercises, addExerciseToLibrary } = useExerciseLibrary();
 
+  // dnd-kit sensors: pointer covers mouse, touch covers fingers (with a
+  // 150ms long-press so the page can still scroll), keyboard wires up the
+  // Tab/Space/Arrow flow that screen-reader users rely on. The pointer
+  // 8px activation distance prevents accidental drags when a coach
+  // intends to click the grip.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
   const allCols = program.columns ?? DEFAULT_COLUMNS;
+
+  /** Flash the drag-save indicator on the targeted day's header. Saving →
+   *  Saved at 600ms (matches the debounced save in AdminView), auto-hide
+   *  after another 2s. Guards each transition against newer events so a
+   *  rapid second drag doesn't get prematurely cleared by the first
+   *  drop's trailing timeout. */
+  const flashSave = (dayId: string) => {
+    setSaveStatus({ dayId, status: 'saving' });
+    setTimeout(() => {
+      setSaveStatus((cur) =>
+        cur.dayId === dayId && cur.status === 'saving' ? { dayId, status: 'saved' } : cur,
+      );
+    }, 600);
+    setTimeout(() => {
+      setSaveStatus((cur) =>
+        cur.dayId === dayId && cur.status === 'saved' ? { dayId: null, status: 'idle' } : cur,
+      );
+    }, 2600);
+  };
 
   // ── Column ops ──────────────────────────────────────────────────────────
 
@@ -396,10 +458,35 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
     });
   };
 
+  // ── Drag-end handlers ───────────────────────────────────────────────────
+
+  const handleExerciseDragEnd = (event: DragEndEvent, week: WorkoutWeek, day: WorkoutDay) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const fromIdx = day.exercises.findIndex((e) => e.id === active.id);
+    const toIdx = day.exercises.findIndex((e) => e.id === over.id);
+    if (fromIdx === -1 || toIdx === -1) return;
+    reorderExercise(week.id, day.id, fromIdx, toIdx);
+    flashSave(day.id);
+  };
+
+  const handleDayDragEnd = (event: DragEndEvent, week: WorkoutWeek) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const fromDay = week.days.find((d) => d.id === active.id);
+    const toDay = week.days.find((d) => d.id === over.id);
+    if (!fromDay || !toDay) return;
+    reorderDay(fromDay.dayNumber, toDay.dayNumber);
+    // Tag the indicator on the day that *moved*; after the swap its id is
+    // still the same record, so this is the row the coach grabbed.
+    flashSave(fromDay.id);
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────
 
-  // Leading 36px column holds the up/down reorder buttons; trailing 40px holds delete.
-  const gridTemplate = `36px minmax(200px, 2fr) ${allCols.map(() => 'minmax(100px, 1fr)').join(' ')} 40px`;
+  // Leading 56px column holds the drag handle + the up/down reorder buttons
+  // (kept as a keyboard/accessibility fallback). Trailing 40px holds delete.
+  const gridTemplate = `56px minmax(200px, 2fr) ${allCols.map(() => 'minmax(100px, 1fr)').join(' ')} 40px`;
 
   return (
     <>
@@ -458,312 +545,405 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
               </Button>
             </div>
 
-            {/* Days */}
-            <div className="space-y-12">
-              {week.days.map((day) => {
-                // Position lookup is per-render: the sorted index drives the
-                // up/down disabled state so the first/last days can't move
-                // past their bounds.
-                const sortedDays = [...week.days].sort((a, b) => a.dayNumber - b.dayNumber);
-                const dayIdx = sortedDays.findIndex((d) => d.dayNumber === day.dayNumber);
-                const isFirst = dayIdx === 0;
-                const isLast = dayIdx === sortedDays.length - 1;
+            {/* Days — wrapped in DndContext per-week so day drags are scoped to
+                their visible week. The underlying reorderDay swaps dayNumbers
+                across every week atomically, so the visual cross-week sync
+                falls out for free. */}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={(event) => handleDayDragEnd(event, week)}
+            >
+              <SortableContext
+                items={week.days.map((d) => d.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="space-y-12">
+                  {week.days.map((day) => {
+                    // Position lookup is per-render: the sorted index drives
+                    // the up/down disabled state so the first/last days can't
+                    // move past their bounds.
+                    const sortedDays = [...week.days].sort((a, b) => a.dayNumber - b.dayNumber);
+                    const dayIdx = sortedDays.findIndex((d) => d.dayNumber === day.dayNumber);
+                    const isFirst = dayIdx === 0;
+                    const isLast = dayIdx === sortedDays.length - 1;
 
-                return (
-                <div key={day.id} className="space-y-6 bg-surface/30 p-6 border border-border/40">
-                  {/* Day header */}
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center space-x-4">
-                      <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
-                        Day {day.dayNumber}
-                        {day.loggedAt && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block ml-2" title="Session logged" />
-                        )}
-                      </span>
-                      <input
-                        value={day.name}
-                        onChange={(e) => updateDayName(day.dayNumber, e.target.value)}
-                        maxLength={150}
-                        title={day.name}
-                        className="bg-transparent border-none outline-none text-base font-display font-semibold uppercase tracking-widest text-foreground focus:ring-0 p-0 w-64 overflow-hidden text-ellipsis whitespace-nowrap"
-                      />
-                    </div>
-                    <div className="flex items-center space-x-4">
-                      <button
-                        onClick={() => !isFirst && reorderDay(day.dayNumber, sortedDays[dayIdx - 1].dayNumber)}
-                        disabled={isFirst}
-                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
-                        title="Move day up"
-                        data-testid={`day-up-btn-${day.dayNumber}`}
-                      >
-                        <ChevronUp className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => !isLast && reorderDay(day.dayNumber, sortedDays[dayIdx + 1].dayNumber)}
-                        disabled={isLast}
-                        className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
-                        title="Move day down"
-                        data-testid={`day-down-btn-${day.dayNumber}`}
-                      >
-                        <ChevronDown className="w-4 h-4" />
-                      </button>
-                      <Button variant="ghost" size="sm" onClick={() => addExercise(week.id, day.id)}>
-                        + Exercise
-                      </Button>
-                      <button
-                        onClick={() => { setBatchImportDayId(day.id); setBatchDraft(''); }}
-                        className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors"
-                        data-testid={`batch-import-btn-${day.id}`}
-                      >
-                        + Batch
-                      </button>
-                      <button
-                        onClick={() => deleteDay(week.id, day.id)}
-                        className="text-muted-foreground hover:text-red-500"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Batch-import panel — paste a newline-separated list of
-                      exercise names. The submit handler propagates each one
-                      across every week's matching day (same as addExercise),
-                      regenerating ids per week so DB rows don't collide. */}
-                  {batchImportDayId === day.id && (() => {
-                    const parsedNames = batchDraft
-                      .split('\n')
-                      .map((n) => n.trim())
-                      .filter((n) => n.length > 0);
                     return (
-                      <div
-                        className="mx-4 mb-4 p-4 bg-surface border border-primary/20 space-y-3"
-                        data-testid={`batch-import-panel-${day.id}`}
-                      >
-                        <p className="text-[10px] font-mono uppercase tracking-widest text-primary/60">
-                          Paste exercise names — one per line
-                        </p>
-                        <textarea
-                          value={batchDraft}
-                          onChange={(e) => setBatchDraft(e.target.value)}
-                          placeholder={'Back Squat\nRomanian Deadlift\nLeg Press'}
-                          rows={5}
-                          className="w-full bg-transparent border-b border-primary/30 focus:border-primary p-2 font-mono text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground/30 transition-colors"
-                          autoFocus
-                        />
-                        <div className="flex gap-2 justify-end">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setBatchImportDayId(null)}
-                          >
-                            Cancel
-                          </Button>
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            disabled={parsedNames.length === 0}
-                            data-testid="batch-import-confirm"
-                            onClick={() => {
-                              if (parsedNames.length === 0) return;
-                              const newExercises = parsedNames.map((name) => ({
-                                id: crypto.randomUUID(),
-                                exerciseId: name.toLowerCase().replace(/\s+/g, '_'),
-                                exerciseName: name,
-                                sets: 3,
-                                reps: '',
-                                expectedRpe: '',
-                                weightRange: '',
-                                actualLoad: '',
-                                actualRpe: '',
-                                notes: '',
-                                videoUrl: '',
-                                values: {} as Record<string, string>,
-                              }));
-                              onChange({
-                                ...program,
-                                weeks: program.weeks.map((w) => ({
-                                  ...w,
-                                  // Match by dayNumber so the import lands at
-                                  // the same slot in every week — mirroring
-                                  // the cross-week behaviour of addExercise.
-                                  days: w.days.map((d) =>
-                                    d.dayNumber === day.dayNumber
-                                      ? {
-                                          ...d,
-                                          exercises: [
-                                            ...d.exercises,
-                                            ...newExercises.map((ex) => ({
-                                              ...ex,
-                                              id: crypto.randomUUID(),
-                                            })),
-                                          ],
-                                        }
-                                      : d,
-                                  ),
-                                })),
-                              });
-                              setBatchImportDayId(null);
-                              setBatchDraft('');
-                            }}
-                          >
-                            Add {parsedNames.length} Exercise{parsedNames.length !== 1 ? 's' : ''}
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Exercise grid */}
-                  <div className="overflow-x-auto pb-4">
-                    <div className="min-w-[800px]">
-                      {/* Column header row */}
-                      <div
-                        className="grid gap-4 px-4 text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 pt-6"
-                        style={{ gridTemplateColumns: gridTemplate }}
-                      >
-                        <span />
-                        <span>Exercise Name</span>
-                        {allCols.map((col) => (
+                      <SortableShell key={day.id} id={day.id}>
+                        {({ setNodeRef, style, handleProps, isDragging, isOver }) => (
                           <div
-                            key={col.id}
-                            className="text-center group relative flex items-center justify-center min-h-[32px]"
+                            ref={setNodeRef}
+                            style={style}
+                            data-testid={`day-card-${day.dayNumber}`}
+                            className={cn(
+                              'space-y-6 bg-surface/30 p-6 border transition-colors',
+                              isDragging && 'opacity-50',
+                              isOver ? 'border-primary/60' : 'border-border/40',
+                            )}
                           >
-                            <span className={cn(col.type === 'actual' ? 'text-primary/60' : '')}>
-                              {col.label}
-                              {col.type === 'actual' && (
-                                <span className="ml-1 text-[8px] text-primary/40">(ACT)</span>
-                              )}
-                            </span>
-                            {/* Edit/delete column controls */}
-                            <div className="absolute -top-6 left-1/2 -translate-x-1/2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                              <button
-                                onClick={() => openEditColumn(col)}
-                                className="text-primary bg-surface rounded-full p-1.5 shadow-md hover:bg-primary/10 border border-primary/20"
-                                title="Edit Column"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => deleteColumn(col.id)}
-                                className="text-danger bg-surface rounded-full p-1.5 shadow-md hover:bg-danger/10 border border-danger/20"
-                                title="Delete Column"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                        <span />
-                      </div>
-
-                      {/* Exercise rows */}
-                      <div className="space-y-2">
-                        {day.exercises.map((ex, exIdx) => (
-                          <div
-                            key={ex.id}
-                            className="grid gap-4 items-center bg-card/50 p-3 border border-border hover:border-primary/40 transition-all group"
-                            style={{ gridTemplateColumns: gridTemplate }}
-                          >
-                            {/* Reorder buttons — per-day-per-week, not synced across weeks */}
-                            <div className="flex flex-col items-center justify-center gap-0.5">
-                              <button
-                                type="button"
-                                onClick={() => reorderExercise(week.id, day.id, exIdx, exIdx - 1)}
-                                disabled={exIdx === 0}
-                                className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
-                              >
-                                <ChevronUp className="w-5 h-5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => reorderExercise(week.id, day.id, exIdx, exIdx + 1)}
-                                disabled={exIdx === day.exercises.length - 1}
-                                className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
-                              >
-                                <ChevronDown className="w-5 h-5" />
-                              </button>
-                            </div>
-                            <ExerciseCombobox
-                              value={ex.exerciseName}
-                              onChange={(v) => updateExercise(week.id, day.id, ex.id, 'exerciseName', v)}
-                              onSelect={(name, videoUrl) =>
-                                selectExerciseFromLibrary(week.id, day.id, ex.id, name, videoUrl)
-                              }
-                              onSaveToLibrary={async (name) => {
-                                // Persist the row's current videoUrl alongside the name so
-                                // future programs that pick this entry from the dropdown
-                                // get the technique reference for free. If the row has no
-                                // video yet, the entry saves with an empty url and the
-                                // coach can attach one later by re-saving.
-                                await addExerciseToLibrary(name, ex.videoUrl ?? '');
-                              }}
-                              exercises={libraryExercises}
-                              maxLength={150}
-                              title={ex.exerciseName}
-                              className="overflow-hidden text-ellipsis whitespace-nowrap"
-                            />
-
-                            {allCols.map((col) => {
-                              const cellValue = String(getExerciseValue(ex, col.id) ?? '');
-                              const colKind = kindForColumnId(col.id);
-                              const colRange = colKind ? RANGES[colKind] : null;
-                              return (
-                                <div key={col.id} className="flex justify-center min-w-0">
-                                  {col.type === 'plan' ? (
-                                    <TechnicalInput
-                                      value={cellValue}
-                                      onChange={(val) =>
-                                        updateExercise(week.id, day.id, ex.id, col.id, val)
-                                      }
-                                      onBlur={
-                                        colKind
-                                          ? (val) => commitExerciseField(week.id, day.id, ex.id, col.id, val)
-                                          : undefined
-                                      }
-                                      // Numeric columns get a tighter character cap and the
-                                      // mobile decimal keypad. 6 chars holds "1000.0" / "100" /
-                                      // "20" / "10.5" comfortably.
-                                      maxLength={colKind ? 6 : 150}
-                                      inputMode={colKind ? 'decimal' : undefined}
-                                      pattern={colKind ? '[0-9.]*' : undefined}
-                                      aria-valuemin={colRange?.min}
-                                      aria-valuemax={colRange?.max}
-                                      title={cellValue}
-                                      className="text-center overflow-hidden text-ellipsis whitespace-nowrap"
-                                      placeholder="..."
-                                    />
-                                  ) : cellValue ? (
-                                    <div
-                                      title={cellValue}
-                                      className="text-xs font-mono italic text-blue-400/80 text-center overflow-hidden text-ellipsis whitespace-nowrap select-text"
-                                    >
-                                      {cellValue}
-                                    </div>
-                                  ) : (
-                                    <div className="text-[10px] font-mono text-muted-foreground/30 italic">
-                                      Trainee Input
-                                    </div>
+                            {/* Day header */}
+                            <div className="flex justify-between items-center">
+                              <div className="flex items-center space-x-4">
+                                {/* Drag handle — primary affordance. dnd-kit
+                                    attaches both pointer and keyboard listeners
+                                    here, so Tab + Space lifts the card. */}
+                                <button
+                                  {...handleProps}
+                                  type="button"
+                                  aria-label={`Drag day ${day.dayNumber}`}
+                                  data-testid={`day-drag-handle-${day.dayNumber}`}
+                                  className={cn(
+                                    'text-muted-foreground hover:text-primary transition-colors',
+                                    isDragging ? 'cursor-grabbing' : 'cursor-grab',
                                   )}
+                                >
+                                  <GripVertical className="w-4 h-4" />
+                                </button>
+                                <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                                  Day {day.dayNumber}
+                                  {day.loggedAt && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-accent inline-block ml-2" title="Session logged" />
+                                  )}
+                                </span>
+                                <input
+                                  value={day.name}
+                                  onChange={(e) => updateDayName(day.dayNumber, e.target.value)}
+                                  maxLength={150}
+                                  title={day.name}
+                                  className="bg-transparent border-none outline-none text-base font-display font-semibold uppercase tracking-widest text-foreground focus:ring-0 p-0 w-64 overflow-hidden text-ellipsis whitespace-nowrap"
+                                />
+                                {/* Drag-driven save indicator */}
+                                {saveStatus.dayId === day.id && saveStatus.status !== 'idle' && (
+                                  <span
+                                    data-testid={`save-status-${day.dayNumber}`}
+                                    className={cn(
+                                      'font-mono text-[9px] uppercase tracking-widest',
+                                      saveStatus.status === 'saving' ? 'text-warning' : 'text-accent',
+                                    )}
+                                  >
+                                    {saveStatus.status === 'saving' ? 'Saving...' : '✓ Saved'}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center space-x-4">
+                                {/* Up/down fallback — kept for keyboard /
+                                    screen-reader users and one-click reordering. */}
+                                <button
+                                  onClick={() => !isFirst && reorderDay(day.dayNumber, sortedDays[dayIdx - 1].dayNumber)}
+                                  disabled={isFirst}
+                                  className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                                  title="Move day up"
+                                  data-testid={`day-up-btn-${day.dayNumber}`}
+                                >
+                                  <ChevronUp className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => !isLast && reorderDay(day.dayNumber, sortedDays[dayIdx + 1].dayNumber)}
+                                  disabled={isLast}
+                                  className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                                  title="Move day down"
+                                  data-testid={`day-down-btn-${day.dayNumber}`}
+                                >
+                                  <ChevronDown className="w-4 h-4" />
+                                </button>
+                                <Button variant="ghost" size="sm" onClick={() => addExercise(week.id, day.id)}>
+                                  + Exercise
+                                </Button>
+                                <button
+                                  onClick={() => { setBatchImportDayId(day.id); setBatchDraft(''); }}
+                                  className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-primary transition-colors"
+                                  data-testid={`batch-import-btn-${day.id}`}
+                                >
+                                  + Batch
+                                </button>
+                                <button
+                                  onClick={() => deleteDay(week.id, day.id)}
+                                  className="text-muted-foreground hover:text-red-500"
+                                >
+                                  <X className="w-5 h-5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Batch-import panel — paste a newline-separated list of
+                                exercise names. The submit handler propagates each one
+                                across every week's matching day (same as addExercise),
+                                regenerating ids per week so DB rows don't collide. */}
+                            {batchImportDayId === day.id && (() => {
+                              const parsedNames = batchDraft
+                                .split('\n')
+                                .map((n) => n.trim())
+                                .filter((n) => n.length > 0);
+                              return (
+                                <div
+                                  className="mx-4 mb-4 p-4 bg-surface border border-primary/20 space-y-3"
+                                  data-testid={`batch-import-panel-${day.id}`}
+                                >
+                                  <p className="text-[10px] font-mono uppercase tracking-widest text-primary/60">
+                                    Paste exercise names — one per line
+                                  </p>
+                                  <textarea
+                                    value={batchDraft}
+                                    onChange={(e) => setBatchDraft(e.target.value)}
+                                    placeholder={'Back Squat\nRomanian Deadlift\nLeg Press'}
+                                    rows={5}
+                                    className="w-full bg-transparent border-b border-primary/30 focus:border-primary p-2 font-mono text-sm text-foreground outline-none resize-none placeholder:text-muted-foreground/30 transition-colors"
+                                    autoFocus
+                                  />
+                                  <div className="flex gap-2 justify-end">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setBatchImportDayId(null)}
+                                    >
+                                      Cancel
+                                    </Button>
+                                    <Button
+                                      variant="primary"
+                                      size="sm"
+                                      disabled={parsedNames.length === 0}
+                                      data-testid="batch-import-confirm"
+                                      onClick={() => {
+                                        if (parsedNames.length === 0) return;
+                                        const newExercises = parsedNames.map((name) => ({
+                                          id: crypto.randomUUID(),
+                                          exerciseId: name.toLowerCase().replace(/\s+/g, '_'),
+                                          exerciseName: name,
+                                          sets: 3,
+                                          reps: '',
+                                          expectedRpe: '',
+                                          weightRange: '',
+                                          actualLoad: '',
+                                          actualRpe: '',
+                                          notes: '',
+                                          videoUrl: '',
+                                          values: {} as Record<string, string>,
+                                        }));
+                                        onChange({
+                                          ...program,
+                                          weeks: program.weeks.map((w) => ({
+                                            ...w,
+                                            // Match by dayNumber so the import lands at
+                                            // the same slot in every week — mirroring
+                                            // the cross-week behaviour of addExercise.
+                                            days: w.days.map((d) =>
+                                              d.dayNumber === day.dayNumber
+                                                ? {
+                                                    ...d,
+                                                    exercises: [
+                                                      ...d.exercises,
+                                                      ...newExercises.map((ex) => ({
+                                                        ...ex,
+                                                        id: crypto.randomUUID(),
+                                                      })),
+                                                    ],
+                                                  }
+                                                : d,
+                                            ),
+                                          })),
+                                        });
+                                        setBatchImportDayId(null);
+                                        setBatchDraft('');
+                                      }}
+                                    >
+                                      Add {parsedNames.length} Exercise{parsedNames.length !== 1 ? 's' : ''}
+                                    </Button>
+                                  </div>
                                 </div>
                               );
-                            })}
+                            })()}
 
-                            <button
-                              onClick={() => deleteExercise(week.id, day.id, ex.id)}
-                              className="text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex justify-center"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {/* Exercise grid */}
+                            <div className="overflow-x-auto pb-4">
+                              <div className="min-w-[800px]">
+                                {/* Column header row */}
+                                <div
+                                  className="grid gap-4 px-4 text-[10px] font-mono text-muted-foreground uppercase tracking-widest mb-2 pt-6"
+                                  style={{ gridTemplateColumns: gridTemplate }}
+                                >
+                                  <span />
+                                  <span>Exercise Name</span>
+                                  {allCols.map((col) => (
+                                    <div
+                                      key={col.id}
+                                      className="text-center group relative flex items-center justify-center min-h-[32px]"
+                                    >
+                                      <span className={cn(col.type === 'actual' ? 'text-primary/60' : '')}>
+                                        {col.label}
+                                        {col.type === 'actual' && (
+                                          <span className="ml-1 text-[8px] text-primary/40">(ACT)</span>
+                                        )}
+                                      </span>
+                                      {/* Edit/delete column controls */}
+                                      <div className="absolute -top-6 left-1/2 -translate-x-1/2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                                        <button
+                                          onClick={() => openEditColumn(col)}
+                                          className="text-primary bg-surface rounded-full p-1.5 shadow-md hover:bg-primary/10 border border-primary/20"
+                                          title="Edit Column"
+                                        >
+                                          <Edit3 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          onClick={() => deleteColumn(col.id)}
+                                          className="text-danger bg-surface rounded-full p-1.5 shadow-md hover:bg-danger/10 border border-danger/20"
+                                          title="Delete Column"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  <span />
+                                </div>
+
+                                {/* Exercise rows — nested DndContext scoped to
+                                    this day's list. Per-day-per-week reordering
+                                    matches the existing splice-in-place semantics
+                                    (other weeks of the same dayNumber stay put). */}
+                                <DndContext
+                                  sensors={sensors}
+                                  collisionDetection={closestCenter}
+                                  onDragEnd={(event) => handleExerciseDragEnd(event, week, day)}
+                                >
+                                  <SortableContext
+                                    items={day.exercises.map((e) => e.id)}
+                                    strategy={verticalListSortingStrategy}
+                                  >
+                                    <div className="space-y-2">
+                                      {day.exercises.map((ex, exIdx) => (
+                                        <SortableShell key={ex.id} id={ex.id}>
+                                          {({ setNodeRef, style, handleProps, isDragging, isOver }) => (
+                                            <div
+                                              ref={setNodeRef}
+                                              style={{ ...style, gridTemplateColumns: gridTemplate }}
+                                              data-testid={`exercise-row-${exIdx}`}
+                                              className={cn(
+                                                'grid gap-4 items-center bg-card/50 p-3 border transition-colors group',
+                                                isDragging && 'opacity-50',
+                                                isOver ? 'border-primary/60' : 'border-border hover:border-primary/40',
+                                              )}
+                                            >
+                                              {/* Grip handle + chevron stack share the leading 56px column. */}
+                                              <div className="flex items-center justify-center gap-1">
+                                                <button
+                                                  {...handleProps}
+                                                  type="button"
+                                                  aria-label={`Drag ${ex.exerciseName}`}
+                                                  data-testid={`exercise-drag-handle-${exIdx}`}
+                                                  className={cn(
+                                                    'text-muted-foreground hover:text-primary transition-colors',
+                                                    isDragging ? 'cursor-grabbing' : 'cursor-grab',
+                                                  )}
+                                                >
+                                                  <GripVertical className="w-4 h-4" />
+                                                </button>
+                                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => reorderExercise(week.id, day.id, exIdx, exIdx - 1)}
+                                                    disabled={exIdx === 0}
+                                                    className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                                                  >
+                                                    <ChevronUp className="w-4 h-4" />
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => reorderExercise(week.id, day.id, exIdx, exIdx + 1)}
+                                                    disabled={exIdx === day.exercises.length - 1}
+                                                    className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                                                  >
+                                                    <ChevronDown className="w-4 h-4" />
+                                                  </button>
+                                                </div>
+                                              </div>
+                                              <ExerciseCombobox
+                                                value={ex.exerciseName}
+                                                onChange={(v) => updateExercise(week.id, day.id, ex.id, 'exerciseName', v)}
+                                                onSelect={(name, videoUrl) =>
+                                                  selectExerciseFromLibrary(week.id, day.id, ex.id, name, videoUrl)
+                                                }
+                                                onSaveToLibrary={async (name) => {
+                                                  // Persist the row's current videoUrl alongside the name so
+                                                  // future programs that pick this entry from the dropdown
+                                                  // get the technique reference for free. If the row has no
+                                                  // video yet, the entry saves with an empty url and the
+                                                  // coach can attach one later by re-saving.
+                                                  await addExerciseToLibrary(name, ex.videoUrl ?? '');
+                                                }}
+                                                exercises={libraryExercises}
+                                                maxLength={150}
+                                                title={ex.exerciseName}
+                                                className="overflow-hidden text-ellipsis whitespace-nowrap"
+                                              />
+
+                                              {allCols.map((col) => {
+                                                const cellValue = String(getExerciseValue(ex, col.id) ?? '');
+                                                const colKind = kindForColumnId(col.id);
+                                                const colRange = colKind ? RANGES[colKind] : null;
+                                                return (
+                                                  <div key={col.id} className="flex justify-center min-w-0">
+                                                    {col.type === 'plan' ? (
+                                                      <TechnicalInput
+                                                        value={cellValue}
+                                                        onChange={(val) =>
+                                                          updateExercise(week.id, day.id, ex.id, col.id, val)
+                                                        }
+                                                        onBlur={
+                                                          colKind
+                                                            ? (val) => commitExerciseField(week.id, day.id, ex.id, col.id, val)
+                                                            : undefined
+                                                        }
+                                                        // Numeric columns get a tighter character cap and the
+                                                        // mobile decimal keypad. 6 chars holds "1000.0" / "100" /
+                                                        // "20" / "10.5" comfortably.
+                                                        maxLength={colKind ? 6 : 150}
+                                                        inputMode={colKind ? 'decimal' : undefined}
+                                                        pattern={colKind ? '[0-9.]*' : undefined}
+                                                        aria-valuemin={colRange?.min}
+                                                        aria-valuemax={colRange?.max}
+                                                        title={cellValue}
+                                                        className="text-center overflow-hidden text-ellipsis whitespace-nowrap"
+                                                        placeholder="..."
+                                                      />
+                                                    ) : cellValue ? (
+                                                      <div
+                                                        title={cellValue}
+                                                        className="text-xs font-mono italic text-blue-400/80 text-center overflow-hidden text-ellipsis whitespace-nowrap select-text"
+                                                      >
+                                                        {cellValue}
+                                                      </div>
+                                                    ) : (
+                                                      <div className="text-[10px] font-mono text-muted-foreground/30 italic">
+                                                        Trainee Input
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                );
+                                              })}
+
+                                              <button
+                                                onClick={() => deleteExercise(week.id, day.id, ex.id)}
+                                                className="text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex justify-center"
+                                              >
+                                                <Trash2 className="w-4 h-4" />
+                                              </button>
+                                            </div>
+                                          )}
+                                        </SortableShell>
+                                      ))}
+                                    </div>
+                                  </SortableContext>
+                                </DndContext>
+                              </div>
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                        )}
+                      </SortableShell>
+                    );
+                  })}
                 </div>
-                );
-              })}
-            </div>
+              </SortableContext>
+            </DndContext>
           </TechnicalCard>
         ))}
       </div>
@@ -785,4 +965,39 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
       )}
     </>
   );
+}
+
+// ─── Sortable render-prop wrapper ───────────────────────────────────────────
+//
+// `useSortable` must be called from a component body, so each draggable
+// row/card needs its own component. To avoid drilling 15+ closure-scoped
+// handlers as props on every row, we expose drag mechanics through a
+// render-prop and let the parent build the JSX inline against its existing
+// closure — keeping the editor's branching logic in one place.
+
+interface SortableRenderArgs {
+  setNodeRef: (el: HTMLElement | null) => void;
+  style: React.CSSProperties;
+  /** Spread onto the drag-handle button. Combines dnd-kit's accessibility
+   *  `attributes` (role, aria, tabindex) with the pointer/touch/keyboard
+   *  `listeners` that actually start the drag. */
+  handleProps: Record<string, unknown>;
+  isDragging: boolean;
+  isOver: boolean;
+}
+
+interface SortableShellProps {
+  id: string;
+  children: (args: SortableRenderArgs) => React.ReactNode;
+}
+
+function SortableShell({ id, children }: SortableShellProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver } =
+    useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+  const handleProps = { ...attributes, ...(listeners ?? {}) };
+  return <>{children({ setNodeRef, style, handleProps, isDragging, isOver })}</>;
 }

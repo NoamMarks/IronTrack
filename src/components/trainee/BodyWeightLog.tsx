@@ -75,6 +75,7 @@ export function BodyWeightLog({ clientId }: BodyWeightLogProps) {
             value={input}
             onChange={(e) => setInput(e.target.value.replace(/[^0-9.]/g, ''))}
             placeholder="Today's weight (kg)"
+            data-testid="bodyweight-input"
             className="bg-transparent outline-none font-mono text-sm text-foreground placeholder:text-muted-foreground/40 flex-1"
           />
           <span className="text-[10px] font-mono text-muted-foreground uppercase">kg</span>
@@ -84,6 +85,7 @@ export function BodyWeightLog({ clientId }: BodyWeightLogProps) {
           size="sm"
           disabled={!input || saving}
           onClick={() => void handleLog()}
+          data-testid="bodyweight-log-btn"
         >
           {saving ? 'Logging…' : 'Log'}
         </Button>
@@ -92,6 +94,7 @@ export function BodyWeightLog({ clientId }: BodyWeightLogProps) {
         {entries.slice(0, 7).map((e) => (
           <div
             key={e.id}
+            data-testid={`bodyweight-entry-${e.id}`}
             className="flex justify-between text-[11px] font-mono border-b border-border/20 py-1"
           >
             <span className="text-muted-foreground">{e.logged_at}</span>

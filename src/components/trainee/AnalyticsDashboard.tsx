@@ -564,6 +564,7 @@ function E1rmChart({
           {goalE1rm && (
             <ReferenceLine
               y={goalE1rm}
+              ifOverflow="extendDomain"
               stroke="rgba(0,255,136,0.6)"
               strokeDasharray="4 4"
               strokeWidth={1.5}
@@ -734,3 +735,4 @@ function EmptyChart({ message }: { message: string }) {
     </motion.div>
   );
 }
+

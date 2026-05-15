@@ -8,10 +8,12 @@ dist-ssr/
 # Vite cache
 .vite/
 
-# Environment variables (never commit secrets)
+# Environment variables (never commit secrets) — broad match catches
+# `.env`, `.env.local`, `.env.production`, `.env.staging`, etc. The
+# example file is explicitly re-included so the template stays tracked.
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # TypeScript
 *.tsbuildinfo

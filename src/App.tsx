@@ -39,6 +39,8 @@ import { isNative } from './lib/platform';
 import { supabase } from './lib/supabase';
 import { TechnicalCard, TechnicalInput, Modal, Toast, Button } from './components/ui';
 import { AccountSettings } from './components/AccountSettings';
+import { CommandPalette } from './components/CommandPalette';
+import { useCommandPalette } from './hooks/useCommandPalette';
 import { cn } from './lib/utils';
 import { AdminView } from './components/admin/AdminView';
 import { SuperadminView } from './components/admin/SuperadminView';
@@ -890,6 +892,8 @@ function AppShell({
   toast,
   onDismissToast,
   onUpdateUser,
+  onOpenCommandPalette,
+  commandPalette,
 }: {
   children: React.ReactNode;
   authenticatedUser: Client;
@@ -902,6 +906,8 @@ function AppShell({
   toast?: string | null;
   onDismissToast?: () => void;
   onUpdateUser: (patch: Partial<Client>) => void;
+  onOpenCommandPalette?: () => void;
+  commandPalette?: React.ReactNode;
 }) {
   const [showSettings, setShowSettings] = useState(false);
 
@@ -971,6 +977,17 @@ function AppShell({
           >
             {authenticatedUser.name}
           </button>
+          {onOpenCommandPalette && (
+            <button
+              type="button"
+              onClick={onOpenCommandPalette}
+              aria-label="Open command palette"
+              data-testid="command-palette-trigger"
+              className="hidden md:inline-flex items-center gap-1 px-2 py-1 border border-border/50 hover:border-primary/60 transition-colors font-mono text-[9px] uppercase tracking-widest text-muted-foreground/70 hover:text-primary"
+            >
+              <span>⌘</span><span>K</span>
+            </button>
+          )}
           {authenticatedUser.role === 'admin' && (
             <button
               onClick={onGoAdmin}
@@ -1002,6 +1019,7 @@ function AppShell({
         {children}
       </motion.main>
       <Toast message={toast ?? null} onDismiss={onDismissToast} />
+      {commandPalette}
       {showSettings && authenticatedUser && (
         <AccountSettings
           user={authenticatedUser}
@@ -1022,6 +1040,7 @@ export default function App() {
   // Native deep-link listener — no-op on web.
   useDeepLinks();
   const { authenticatedUser, view, loginError, isLoading: isAuthLoading, login, logout, setView, impersonating, impersonate, stopImpersonating, patchAuthenticatedUser } = useAuth();
+  const commandPalette = useCommandPalette();
   const {
     clients,
     isLoadingData,
@@ -1457,6 +1476,28 @@ export default function App() {
   // Tenant-scoped clients for the current user
   const tenantClients = authenticatedUser ? getClientsForTenant(authenticatedUser) : [];
 
+  // Command palette node — constructed once, passed as a slot to AppShell so
+  // it overlays on top of every authenticated view. Wiring lives here because
+  // setView / setSelectedClient / role are all App-level concerns.
+  const paletteNode = authenticatedUser ? (
+    <CommandPalette
+      isOpen={commandPalette.isOpen}
+      onClose={commandPalette.close}
+      clients={tenantClients}
+      onSelectClient={(c) => {
+        setSelectedClient(c);
+        setView('coach');
+        commandPalette.close();
+      }}
+      onGoCoach={() => { setView('coach'); commandPalette.close(); }}
+      onGoSuperadmin={
+        authenticatedUser.role === 'superadmin'
+          ? () => { setView('superadmin'); commandPalette.close(); }
+          : undefined
+      }
+    />
+  ) : null;
+
   // ── Signup ──────────────────────────────────────────────────────────────
 
   if (view === 'signup') {
@@ -1553,6 +1594,8 @@ export default function App() {
         onToggleTheme={toggleTheme}
         onLogout={logout}
         onUpdateUser={patchAuthenticatedUser}
+        onOpenCommandPalette={commandPalette.open}
+        commandPalette={paletteNode}
         toast={toast}
         onDismissToast={dismissToast}
         onGoAdmin={() => {}}
@@ -1581,6 +1624,8 @@ export default function App() {
         onToggleTheme={toggleTheme}
         onLogout={logout}
         onUpdateUser={patchAuthenticatedUser}
+        onOpenCommandPalette={commandPalette.open}
+        commandPalette={paletteNode}
         toast={toast}
         onDismissToast={dismissToast}
         onGoAdmin={() => setView('admin')}
@@ -1615,6 +1660,8 @@ export default function App() {
         onToggleTheme={toggleTheme}
         onLogout={logout}
         onUpdateUser={patchAuthenticatedUser}
+        onOpenCommandPalette={commandPalette.open}
+        commandPalette={paletteNode}
         toast={toast}
         onDismissToast={dismissToast}
         onGoAdmin={() => setView('admin')}
@@ -1681,6 +1728,8 @@ export default function App() {
           onToggleTheme={toggleTheme}
           onLogout={logout}
           onUpdateUser={patchAuthenticatedUser}
+          onOpenCommandPalette={commandPalette.open}
+          commandPalette={paletteNode}
           toast={toast}
           onDismissToast={dismissToast}
           onGoAdmin={() => setView('admin')}
@@ -1730,6 +1779,8 @@ export default function App() {
       onToggleTheme={toggleTheme}
       onLogout={logout}
       onUpdateUser={patchAuthenticatedUser}
+      onOpenCommandPalette={commandPalette.open}
+      commandPalette={paletteNode}
       toast={toast}
       onDismissToast={dismissToast}
       onGoAdmin={() => setView('admin')}
