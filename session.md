@@ -233,16 +233,18 @@ Superadmin can impersonate a coach. Implemented as a client-side `authenticatedU
 - Save/load/edit/delete program templates
 - Program duplication (with actuals stripped)
 - Program archive
+- Archived blocks viewer with restore
 - Coach feedback on completed sessions (visible to trainee in history)
 - Program block notes (coach context visible to trainee on dashboard)
 - Client notes (coach-private, localStorage per device)
-- Real-time activity feed (Supabase realtime subscription)
+- Real-time activity drawer (Cmd+click 'Activity' button)
 - Cohort analytics across all trainees (aggregate compliance, sessions, PRs)
 - Push notifications to trainees (`api/send-notification.ts`)
 - Send-feedback compose UI per client in the sidebar
 
 ### Trainee Features
 - Workout grid logger with per-set load/RPE/completion toggle
+- Smart workout flow — auto-advance to next set on completion, smart rest timer auto-start with RPE-based defaults, end-of-workout summary with PR celebrations and session comparison
 - Inline plate calculator
 - Rest timer (FAB, voice commands, presets)
 - Post-workout reflection (1–5 difficulty + free-text note)
@@ -419,8 +421,11 @@ VITE_SENTRY_DSN=...                 # Error monitoring (optional)
 - **`exerciseId` in custom batch import is derived from name** (`name.toLowerCase().replace(/\s+/g, '_')`). Duplicate names collide. Consider this when implementing analytics across imported exercises.
 - **The progress bar in `WorkoutGridLogger` uses `scaleX`, not `width`** — this was a deliberate fix from a previous performance audit.
 - **Drag-and-drop uses @dnd-kit, NOT Framer Motion.** Do not animate dragged items with motion — dnd-kit's transform handler will conflict. Sortable rows/cards render through the `SortableShell` render-prop helper in `ProgramEditor.tsx`; the up/down chevrons stay alongside the grip handle as a keyboard fallback (don't remove them).
+- **After archive/duplicate, `editingProgram` must be set to the next active program or the new copy** — falling back to `null` shows the empty state and reads as a UI bug to coaches. Use `activeProgramOf(fresh)` to pick the surviving block after archive; capture the duplicate return value to switch the editor to the copy.
 - **Cmd+K / Ctrl+K is reserved for the command palette.** If you add another keyboard shortcut, check `useCommandPalette.ts` first — it owns the global keydown listener.
 - **Recharts `<ReferenceLine>` defaults to `ifOverflow="discard"`** — any reference line outside the data's Y-axis domain is silently hidden. If you add a goal/target line to a chart, set `ifOverflow="extendDomain"` so the axis expands to include it. We hit this with the 1RM goal feature: trainees setting aspirational goals saw no line until they'd already exceeded it.
+- **State-initialization trap on prop change.** `useState(initializer)` only runs once per component instance. If a parent passes a changing prop that should reset child state (e.g., `clientId` to `ClientNotes`, `program` to `BlockNotes`), you MUST add a `useEffect` keyed on that prop to re-sync state — otherwise the component silently shows stale data from the previous prop value. This was the root cause of two production bugs (coach notes and block notes mixing across selections). Apply this pattern to any future component whose internal state mirrors a prop.
+- **Supabase OTP length is 8 digits in this project (not the default 6).** The signup form's verification input enforces `maxLength={8}` and `pattern="[0-9]{8}"`. If you change auth providers or Supabase OTP config, sync `SignupPage.tsx` to match.
 
 ---
 

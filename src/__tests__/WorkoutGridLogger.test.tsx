@@ -146,7 +146,14 @@ describe('WorkoutGridLogger', () => {
     const finishBtn = screen.getByTestId('finish-session-btn-bottom');
     fireEvent.click(finishBtn);
 
-    // onFinish is called asynchronously after the confirm; flush microtasks.
+    // Finish now opens a WorkoutSummary overlay before onFinish fires —
+    // the trainee picks Submit Reflection (queues reflection modal) or
+    // Close Without Reflection (skips it). Both ultimately call onFinish
+    // / onFinishSilent. Click Submit Reflection to invoke onFinish.
+    const submitBtn = await screen.findByTestId('summary-submit-reflection-btn');
+    fireEvent.click(submitBtn);
+
+    // onFinish is called asynchronously; flush microtasks.
     await new Promise((r) => setTimeout(r, 0));
 
     expect(onFinish).toHaveBeenCalledOnce();
@@ -183,6 +190,10 @@ describe('WorkoutGridLogger', () => {
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     fireEvent.click(screen.getByTestId('finish-session-btn-bottom'));
+
+    // Click through the new WorkoutSummary screen to actually invoke onFinish.
+    const submitBtn = await screen.findByTestId('summary-submit-reflection-btn');
+    fireEvent.click(submitBtn);
     await new Promise((r) => setTimeout(r, 0));
 
     const savedEx = (onFinish.mock.calls[0][0] as WorkoutDay).exercises[0];

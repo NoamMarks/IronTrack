@@ -15,12 +15,15 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  Timer,
+  X as XIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { TechnicalCard } from '../ui';
 import { cn } from '../../lib/utils';
 import { DEFAULT_COLUMNS } from '../../constants/mockData';
 import { PlateCalculator } from './PlateCalculator';
+import { WorkoutSummary } from './WorkoutSummary';
 import { hapticTick, hapticHeavy } from '../../lib/haptics';
 import { sanitizeOnType, clampOnCommit, parseNumeric } from '../../lib/numericInput';
 import {
@@ -115,6 +118,48 @@ function countDoneSets(ex: ExercisePlan): number {
   return count;
 }
 
+/**
+ * RPE-based rest-duration heuristic, used when the trainee marks a set done
+ * and the auto-rest path is enabled. The brief originally specified
+ * "history-averaging" using per-set completion timestamps, but the schema
+ * stores only load/rpe/completed per set — no completedAt — so the heuristic
+ * is the entire algorithm for now. Documented as a follow-up in session.md.
+ */
+function suggestedRestSeconds(rpeRaw: string | undefined): number {
+  if (!rpeRaw) return 120;
+  const n = parseFloat(rpeRaw);
+  if (!Number.isFinite(n)) return 120;
+  if (n <= 6) return 60;
+  if (n < 9) return 90; // 7 – 8.5
+  return 180; // 9 – 10
+}
+
+/** Minimal CSS-attribute-selector escape for UUIDs. UUIDs only contain
+ *  [0-9a-f-], none of which need escaping inside a `[data-testid="..."]`
+ *  selector — this helper exists as a safety net for the day someone
+ *  swaps in a different id strategy (slashes, quotes, etc.). */
+function cssEscapeAttr(s: string): string {
+  return s.replace(/["\\]/g, '\\$&');
+}
+
+const AUTOREST_OPT_OUT_PREFIX = 'irontrack_autorest_';
+function isAutoRestDisabled(userId: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(AUTOREST_OPT_OUT_PREFIX + userId) === 'disabled';
+  } catch {
+    return false;
+  }
+}
+function setAutoRestDisabled(userId: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(AUTOREST_OPT_OUT_PREFIX + userId, 'disabled');
+  } catch {
+    /* localStorage full / blocked — opt-out simply won't persist */
+  }
+}
+
 // ─── Props ───────────────────────────────────────────────────────────────────
 
 interface WorkoutGridLoggerProps {
@@ -128,8 +173,16 @@ interface WorkoutGridLoggerProps {
    *  timer after every input change. */
   onAutoSave: (updatedDay: WorkoutDay) => Promise<void>;
   /** Explicit "Finish Workout" — marks the day complete and exits. The
-   *  trainee triggers this only when they're done with the session. */
+   *  trainee triggers this only when they're done with the session. The
+   *  parent (App.tsx) queues the reflection modal after this resolves. */
   onFinish: (updatedDay: WorkoutDay) => Promise<void> | void;
+  /** Same persistence as onFinish but skips the reflection-modal queue.
+   *  Wired to the Summary screen's "Close Without Reflection" button so a
+   *  trainee who's done with feedback for the session goes straight to
+   *  the dashboard. Optional — when omitted, the Summary falls back to
+   *  calling onFinish for both paths and the user can Skip the reflection
+   *  modal manually. */
+  onFinishSilent?: (updatedDay: WorkoutDay) => Promise<void> | void;
 }
 
 type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -146,10 +199,27 @@ export function WorkoutGridLogger({
   onBack,
   onAutoSave,
   onFinish,
+  onFinishSilent,
 }: WorkoutGridLoggerProps) {
   const [exercises, setExercises] = useState<ExercisePlan[]>(day.exercises);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  // Auto-rest toast: surfaces seconds + action row after a false→true done
+  // toggle. State lives here (not in App.tsx's toast) because the actions
+  // (+30s, Start manual, opt-out) need direct logger context. `exerciseId`
+  // is kept so the toast can reference which set just finished.
+  const [autoRest, setAutoRest] = useState<{
+    seconds: number;
+    exerciseId: string;
+    setN: number;
+  } | null>(null);
+  const autoRestDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // End-of-workout summary overlay. When the trainee taps Finish, the
+  // session is persisted and this flips true; the Summary renders over
+  // the logger until they choose Submit Reflection or Close Without
+  // Reflection, at which point onFinish/onFinishSilent fires and the
+  // parent unmounts the logger.
+  const [showSummary, setShowSummary] = useState(false);
   // Tracks every blob: URL created during this session so we can revoke them
   // all on unmount. URL.createObjectURL pins memory until revokeObjectURL is
   // called; without this, uploading multiple videos in one workout leaks.
@@ -307,11 +377,58 @@ export function WorkoutGridLogger({
   // any caller can still set it through the generic updateExercise(id,
   // '__completed', '1') path, which lands in ex.values via the catch-all.
 
+  /**
+   * Focus the next incomplete set's load input. Walks the **current** display
+   * order of exercises — sets within the same exercise first, then the next
+   * exercise's first incomplete set. RAF-wrapped so the focus call lands
+   * after the state-update flush; smooth scrollIntoView with block:'center'
+   * keeps the keyboard from covering the field on mobile.
+   *
+   * No-ops silently if everything is already done.
+   */
+  const advanceFocus = useCallback((currentExerciseId: string, currentSetN: number) => {
+    requestAnimationFrame(() => {
+      const list = exercisesRef.current;
+      const startIdx = list.findIndex((e) => e.id === currentExerciseId);
+      if (startIdx === -1) return;
+
+      // Pass 1: remaining sets in the current exercise.
+      const currentEx = list[startIdx];
+      for (let n = currentSetN + 1; n <= setCount(currentEx); n += 1) {
+        if (!isSetDone(currentEx, n)) {
+          focusLoadInput(currentEx.id, n);
+          return;
+        }
+      }
+      // Pass 2: first incomplete set in any subsequent exercise.
+      for (let i = startIdx + 1; i < list.length; i += 1) {
+        const ex = list[i];
+        for (let n = 1; n <= setCount(ex); n += 1) {
+          if (!isSetDone(ex, n)) {
+            focusLoadInput(ex.id, n);
+            return;
+          }
+        }
+      }
+      // Nothing left — let the trainee notice the Finish CTA themselves.
+    });
+  }, []);
+
   const toggleSetDone = (id: string, setN: number) => {
     hapticTick();
     hasUserEditedRef.current = true;
     editVersionRef.current += 1;
     const key = setDoneKey(setN);
+
+    // Detect the false→true transition BEFORE mutating state. We only
+    // auto-advance / auto-rest when a set goes from not-done to done.
+    // Un-checking and re-checking a previously-done set must remain a
+    // no-op on the side effects (it would scroll the page out from under
+    // the trainee and start a phantom rest timer).
+    const prevEx = exercisesRef.current.find((e) => e.id === id);
+    const wasDone = prevEx?.values?.[key] === '1';
+    const willBeDone = !wasDone;
+
     setExercises((prev) =>
       prev.map((ex) => {
         if (ex.id !== id) return ex;
@@ -319,26 +436,93 @@ export function WorkoutGridLogger({
         return { ...ex, values: { ...(ex.values ?? {}), [key]: flipped } };
       }),
     );
+
+    if (!willBeDone || !prevEx) return;
+
+    // Side effects (auto-advance + auto-rest) only fire on the off→on
+    // transition. Both are best-effort — if the user toggles rapidly we
+    // tolerate occasional jitter rather than try to debounce.
+    advanceFocus(id, setN);
+
+    if (!isAutoRestDisabled(client.id)) {
+      // RPE for the just-completed set — checks the per-set key first, then
+      // falls back to legacy ex.actualRpe for set 1. Same precedence the
+      // analytics code uses.
+      const rpe = prevEx.values?.[setRpeKey(setN)]
+        ?? (setN === 1 ? prevEx.actualRpe ?? undefined : undefined);
+      const seconds = suggestedRestSeconds(rpe);
+
+      // Fire the cross-component event so the existing RestTimer FAB
+      // actually counts down — the toast below is the kick-off acknowledgement.
+      window.dispatchEvent(new CustomEvent('irontrack:rest-start', { detail: { seconds } }));
+
+      // Toast lifecycle: open immediately, auto-dismiss after 4s unless
+      // another set is finished within that window (in which case the new
+      // toast replaces the old). Cancel any prior timer first.
+      if (autoRestDismissTimerRef.current) {
+        clearTimeout(autoRestDismissTimerRef.current);
+      }
+      setAutoRest({ seconds, exerciseId: id, setN });
+      autoRestDismissTimerRef.current = setTimeout(() => {
+        setAutoRest(null);
+        autoRestDismissTimerRef.current = null;
+      }, 4000);
+    }
   };
 
-  const handleFinish = useCallback(async () => {
-    // Cancel the pending autosave — onFinish persists everything AND marks
-    // the day complete, so the autosave would just be redundant.
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
+  /** Inline helper for advanceFocus — pulls the load input by testid and
+   *  scrolls it into view. Separated so the RAF callback reads cleanly. */
+  function focusLoadInput(exerciseId: string, setN: number) {
+    const selector = `input[data-testid="input-${cssEscapeAttr(exerciseId)}-set-${setN}-load"]`;
+    const el = document.querySelector(selector);
+    if (el instanceof HTMLInputElement) {
+      el.focus({ preventScroll: true });
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    hapticHeavy();
-    setSaveStatus('saving');
-    try {
-      await onFinish({ ...dayRef.current, exercises: exercisesRef.current });
-      // After a successful finish the parent unmounts this component, so
-      // setSaveStatus('saved') would be a no-op. Leave it.
-    } catch (err) {
-      console.error('[IronTrack] finish failed', err);
-      setSaveStatus('error');
+  }
+
+  /** Bump the live auto-rest by +30s — both the toast and the running
+   *  countdown re-fire from the original start, since the RestTimer's
+   *  internal state is the source of truth. We dispatch a fresh start
+   *  event with the updated total. */
+  const extendAutoRest = () => {
+    if (!autoRest) return;
+    const next = Math.min(autoRest.seconds + 30, 999);
+    window.dispatchEvent(new CustomEvent('irontrack:rest-start', { detail: { seconds: next } }));
+    setAutoRest({ ...autoRest, seconds: next });
+    if (autoRestDismissTimerRef.current) clearTimeout(autoRestDismissTimerRef.current);
+    autoRestDismissTimerRef.current = setTimeout(() => {
+      setAutoRest(null);
+      autoRestDismissTimerRef.current = null;
+    }, 4000);
+  };
+
+  const dismissAutoRest = () => {
+    if (autoRestDismissTimerRef.current) {
+      clearTimeout(autoRestDismissTimerRef.current);
+      autoRestDismissTimerRef.current = null;
     }
-  }, [onFinish]);
+    setAutoRest(null);
+  };
+
+  const optOutAutoRest = () => {
+    setAutoRestDisabled(client.id);
+    dismissAutoRest();
+  };
+
+  // Cleanup the auto-rest timer on unmount so it doesn't fire after the
+  // logger is torn down.
+  useEffect(() => {
+    return () => {
+      if (autoRestDismissTimerRef.current) clearTimeout(autoRestDismissTimerRef.current);
+    };
+  }, []);
+
+  // Note: the legacy `handleFinish` is gone — its three responsibilities
+  // (cancel autosave, persist, advance UX) are now split across
+  // handleFinishWithConfirm (cancel autosave + show Summary) and the two
+  // Summary-callback handlers below (persist via onFinish / onFinishSilent).
+  // Kept this comment so a `git blame` reader sees why the symbol vanished.
 
   const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -383,9 +567,10 @@ export function WorkoutGridLogger({
   }, [blobUrlsRef]);
 
   // Confirmation handler — wraps handleFinish with a check for partially-
-  // logged sessions. We use window.confirm because it's the simplest
-  // dependable cross-platform dialog and matches the pattern already used
-  // by archive/delete elsewhere in the app.
+  // logged sessions, then surfaces the WorkoutSummary overlay BEFORE
+  // calling onFinish (which would unmount the logger). The Summary then
+  // routes the user to either the reflection modal (via onFinish) or
+  // straight back to the dashboard (via onFinishSilent).
   const handleFinishWithConfirm = useCallback(async () => {
     const total = exercises.reduce((s, ex) => s + setCount(ex), 0);
     const done = exercises.reduce((s, ex) => s + countDoneSets(ex), 0);
@@ -395,8 +580,53 @@ export function WorkoutGridLogger({
       );
       if (!ok) return;
     }
-    await handleFinish();
-  }, [exercises, handleFinish]);
+    // Cancel any pending debounced autosave — the explicit flush below
+    // supersedes it. Without this, a stale autosave could fire while the
+    // Summary is open and race the finish-time write from the Summary
+    // callbacks.
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    // Flush any in-flight autosave so the Summary's stat math reads from
+    // committed data. The Summary itself reads from local exercises state,
+    // so the network flush isn't strictly required for visuals — but it
+    // means the cancel-from-summary path (close browser, lose power, etc.)
+    // leaves a coherent server-side snapshot.
+    await flushSaveNow();
+    hapticHeavy();
+    setShowSummary(true);
+  }, [exercises, flushSaveNow]);
+
+  // Called from the Summary screen. Persists the session AND queues the
+  // reflection modal via the parent — same path as the legacy direct
+  // Finish click.
+  const handleSummarySubmitReflection = useCallback(async () => {
+    setSaveStatus('saving');
+    try {
+      await onFinish({ ...dayRef.current, exercises: exercisesRef.current });
+    } catch (err) {
+      console.error('[IronTrack] finish failed', err);
+      setSaveStatus('error');
+      setShowSummary(false);
+    }
+  }, [onFinish]);
+
+  // Called from the Summary screen. Persists the session WITHOUT queuing
+  // a reflection. Falls back to onFinish when the parent didn't wire
+  // onFinishSilent (which then leaves the reflection modal queued; the
+  // trainee can hit Skip on it). Either way the logger unmounts.
+  const handleSummaryCloseWithoutReflection = useCallback(async () => {
+    setSaveStatus('saving');
+    try {
+      const handler = onFinishSilent ?? onFinish;
+      await handler({ ...dayRef.current, exercises: exercisesRef.current });
+    } catch (err) {
+      console.error('[IronTrack] finish (silent) failed', err);
+      setSaveStatus('error');
+      setShowSummary(false);
+    }
+  }, [onFinish, onFinishSilent]);
 
   return (
     <div className="space-y-4 md:space-y-6 h-full flex flex-col">
@@ -917,6 +1147,89 @@ export function WorkoutGridLogger({
           setPlateCalcExerciseId(null);
         }}
       />
+
+      {/* Auto-rest toast — bottom-center, brutalist warning palette. Lives
+          here (not in App.tsx's toast) because its action row needs direct
+          logger context. The RestTimer FAB still owns the actual countdown
+          via the irontrack:rest-start event dispatched in toggleSetDone. */}
+      <AnimatePresence>
+        {autoRest && (
+          <motion.div
+            role="status"
+            data-testid="auto-rest-toast"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.18 }}
+            className="
+              fixed bottom-24 left-1/2 -translate-x-1/2 z-[150]
+              bg-surface border border-warning/50
+              shadow-[0_0_24px_-8px_rgba(255,179,0,0.45)]
+              px-4 py-3 flex flex-col items-stretch gap-2
+              max-w-[92vw] sm:max-w-md
+            "
+          >
+            <div className="flex items-center gap-2.5">
+              <Timer className="w-4 h-4 text-warning shrink-0" />
+              <span className="text-xs font-mono uppercase tracking-widest text-warning">
+                Rest {autoRest.seconds}s
+              </span>
+              <button
+                onClick={dismissAutoRest}
+                aria-label="Dismiss"
+                data-testid="auto-rest-dismiss"
+                className="ml-auto text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <XIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={extendAutoRest}
+                data-testid="auto-rest-extend"
+                className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-widest border border-warning/40 text-warning hover:bg-warning/10 transition-colors"
+              >
+                +30s
+              </button>
+              <button
+                onClick={() => {
+                  // "Start manual" — the timer is already running; this just
+                  // re-opens the FAB countdown in case the user dismissed it.
+                  window.dispatchEvent(
+                    new CustomEvent('irontrack:rest-start', { detail: { seconds: autoRest.seconds } }),
+                  );
+                  dismissAutoRest();
+                }}
+                data-testid="auto-rest-manual"
+                className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-widest border border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground transition-colors"
+              >
+                Open Timer
+              </button>
+              <button
+                onClick={optOutAutoRest}
+                data-testid="auto-rest-opt-out"
+                className="ml-auto text-[9px] font-mono uppercase tracking-widest text-muted-foreground/70 underline underline-offset-2 hover:text-muted-foreground transition-colors"
+              >
+                Don't auto-start
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Workout-complete summary — full-screen overlay surfaced AFTER the
+          confirm-incomplete dialog and BEFORE the parent's reflection
+          modal. Two action paths, both ultimately call onFinish /
+          onFinishSilent to unmount the logger. */}
+      {showSummary && (
+        <WorkoutSummary
+          day={{ ...day, exercises }}
+          client={client}
+          program={program}
+          onClose={() => void handleSummaryCloseWithoutReflection()}
+          onSubmitReflection={() => void handleSummarySubmitReflection()}
+        />
+      )}
     </div>
   );
 }

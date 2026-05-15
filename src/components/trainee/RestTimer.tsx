@@ -81,6 +81,26 @@ export function RestTimer() {
     setVoiceError('');
   }, []);
 
+  // ── Cross-component start bridge ────────────────────────────────────────
+  // The WorkoutGridLogger fires `irontrack:rest-start` with `detail.seconds`
+  // when a trainee marks a set done and auto-rest is enabled. Using a window
+  // event keeps RestTimer self-contained — no prop drilling from App.tsx, no
+  // shared context. The listener tears down on unmount so swapping shells
+  // (e.g. trainee logging out) doesn't leak it.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onStart = (e: Event) => {
+      const detail = (e as CustomEvent<{ seconds?: number }>).detail;
+      const secs = typeof detail?.seconds === 'number' && detail.seconds > 0
+        ? Math.min(Math.floor(detail.seconds), 999)
+        : null;
+      if (secs === null) return;
+      startTimer(secs);
+    };
+    window.addEventListener('irontrack:rest-start', onStart);
+    return () => window.removeEventListener('irontrack:rest-start', onStart);
+  }, [startTimer]);
+
   // ── Voice recognition ──────────────────────────────────────────────────
 
   const toggleVoice = useCallback(() => {

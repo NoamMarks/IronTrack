@@ -1361,6 +1361,36 @@ export default function App() {
     setActiveWorkout(null);
   };
 
+  /** Sibling of handleFinishSession that intentionally does NOT queue the
+   *  reflection modal. Wired to the WorkoutSummary's "Close Without
+   *  Reflection" path — the trainee already consumed the celebratory
+   *  summary and doesn't want a second feedback prompt. The session is
+   *  still persisted with markComplete: true so the day shows up as
+   *  logged in the dashboard. */
+  const handleFinishSessionSilent = async (updatedDay: WorkoutDay): Promise<void> => {
+    if (!selectedClient || !activeWorkout) return;
+    const programById = selectedClient.programs.find(
+      (p) => p.id === selectedClient.activeProgramId,
+    );
+    if (programById?.status === 'archived') {
+      setToast('Your program was archived by your coach. Please contact them before continuing.');
+      return;
+    }
+    const program =
+      programById ??
+      selectedClient.programs.find((p) => p.status !== 'archived');
+    if (!program) return;
+    await saveSession(
+      selectedClient.id,
+      program.id,
+      activeWorkout.week.id,
+      updatedDay,
+      { markComplete: true },
+    );
+    setActiveWorkout(null);
+    setToast('Workout finished — well done!');
+  };
+
   const handleReflectionSubmit = async (difficulty: number, note: string): Promise<void> => {
     const ctx = pendingReflection;
     if (!ctx) return;
@@ -1640,6 +1670,7 @@ export default function App() {
           onBack={() => setActiveWorkout(null)}
           onAutoSave={handleAutoSaveSession}
           onFinish={handleFinishSession}
+          onFinishSilent={handleFinishSessionSilent}
         />
         <RestTimer />
       </AppShell>
