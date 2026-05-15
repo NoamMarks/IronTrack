@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Trash2, Archive, Link2, Link as LinkIcon, Copy, Check, Library, Bell, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Trash2, Archive, Link2, Link as LinkIcon, Copy, Check, Library, Bell, BarChart3, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProgramEditor } from './ProgramEditor';
 import { RecentActivityPanel } from './RecentActivityPanel';
@@ -7,6 +7,7 @@ import { TemplateBrowser } from './TemplateBrowser';
 import { CohortAnalytics } from './CohortAnalytics';
 import { ClientNotes } from './ClientNotes';
 import { BlockNotes } from './BlockNotes';
+import { ArchivedBlocksModal } from './ArchivedBlocksModal';
 import { Modal, Toast, Button } from '../ui';
 import { cn } from '../../lib/utils';
 import {
@@ -49,7 +50,15 @@ interface AdminViewProps {
   ) => Promise<Program>;
   onDeleteClient: (clientId: string) => Promise<void>;
   onArchiveProgram: (clientId: string, programId: string) => Promise<void>;
-  onDuplicateProgram?: (clientId: string, program: Program) => Promise<void>;
+  /** Restore an archived program — flips it back to `status: 'active'`.
+   *  Optional so environments without the wired-up restore action stay
+   *  functional; the View Archived button still surfaces a read-only list. */
+  onRestoreProgram?: (clientId: string, programId: string) => Promise<void>;
+  /** Duplicate the program and return the new copy so the editor can
+   *  switch to it without a refetch. Previously returned `Promise<void>` —
+   *  discarding the return value left the editor on the original block
+   *  with no visible feedback. */
+  onDuplicateProgram?: (clientId: string, program: Program) => Promise<Program>;
   /** Send a Web Push notification to a trainee. Wired to the
    *  /api/send-notification serverless endpoint by App.tsx. Optional so
    *  builds without VAPID keys (or environments where push isn't
@@ -71,6 +80,7 @@ export function AdminView({
   onCreateProgramFromTemplate,
   onDeleteClient,
   onArchiveProgram,
+  onRestoreProgram,
   onDuplicateProgram,
   onSendNotification,
   onSaveBlockNotes,
@@ -108,6 +118,12 @@ export function AdminView({
   // Cohort-analytics drawer toggle — collapses by default so the editor
   // keeps its full height when the coach is mid-edit.
   const [showCohort, setShowCohort] = useState(false);
+  // Slide-out activity drawer — previously a sticky third column that
+  // pushed the editor off-screen on narrower widths.
+  const [showActivity, setShowActivity] = useState(false);
+  // Archived-blocks viewer — modal listing the client's archived programs
+  // with a Restore action per row.
+  const [showArchived, setShowArchived] = useState(false);
 
   // Load invite codes
   useEffect(() => {
@@ -243,7 +259,15 @@ export function AdminView({
     flushSave();
     try {
       await onArchiveProgram(selectedClient.id, editingProgram.id);
-      setEditingProgram(null);
+      // Jump to the client's next active program rather than the empty
+      // state — reading the empty state as "the archived block is still
+      // around" was the source of the original bug report.
+      // `clients` is mutated in place by useProgramData, so the freshest
+      // snapshot is already on the array we hold.
+      const fresh = clients.find((c) => c.id === selectedClient.id) ?? selectedClient;
+      setEditingProgram(activeProgramOf(fresh));
+      setDupeToast('Program archived');
+      setTimeout(() => setDupeToast(null), 3000);
     } catch (err) {
       console.error('[IronTrack admin] archiveProgram failed', err);
     }
@@ -254,8 +278,12 @@ export function AdminView({
   const handleDuplicateProgram = async () => {
     if (!selectedClient || !editingProgram || !onDuplicateProgram) return;
     try {
-      await onDuplicateProgram(selectedClient.id, editingProgram);
-      setDupeToast('Program duplicated successfully');
+      const newProgram = await onDuplicateProgram(selectedClient.id, editingProgram);
+      // Switch the editor over to the copy. Without this swap, the coach
+      // is left looking at the original block and the duplicate appears
+      // to have done nothing.
+      setEditingProgram(newProgram);
+      setDupeToast('Block duplicated — now editing the copy');
       setTimeout(() => setDupeToast(null), 3000);
     } catch (err) {
       console.error('[IronTrack admin] duplicateProgram failed', err);
@@ -439,7 +467,7 @@ export function AdminView({
         )}
       </div>
 
-      <div className="grid grid-cols-[300px_1fr] xl:grid-cols-[300px_1fr_320px] gap-8 xl:gap-10">
+      <div className="grid grid-cols-[300px_1fr] gap-8">
         {/* Client list */}
         <div className="space-y-6">
           <h3 className="text-xs font-mono uppercase text-primary/60 tracking-widest border-b border-primary/20 pb-2">
@@ -561,7 +589,16 @@ export function AdminView({
         <div className="space-y-6">
           {editingProgram ? (
             <>
-              <div className="flex justify-end items-center gap-2">
+              <div className="flex justify-end items-center gap-2 flex-wrap">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowActivity(true)}
+                  data-testid="open-activity-drawer"
+                >
+                  <Activity className="w-3.5 h-3.5 mr-1.5" />
+                  Activity
+                </Button>
                 <Button
                   variant={showCohort ? 'primary' : 'ghost'}
                   size="sm"
@@ -571,6 +608,17 @@ export function AdminView({
                   <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
                   {showCohort ? 'Hide Cohort' : 'Cohort View'}
                 </Button>
+                {selectedClient && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowArchived(true)}
+                    data-testid="view-archived-btn"
+                  >
+                    <Archive className="w-3.5 h-3.5 mr-1.5" />
+                    View Archived ({selectedClient.programs.filter((p) => p.status === 'archived').length})
+                  </Button>
+                )}
                 {onDuplicateProgram && (
                   <Button
                     variant="ghost"
@@ -654,15 +702,48 @@ export function AdminView({
           )}
         </div>
 
-        {/* Recent activity — third column on xl+, hidden on smaller widths
-            so the program editor keeps room to breathe. The realtime
-            subscription stays mounted whenever this is rendered, so the
-            feed populates the moment a trainee submits a reflection. */}
-        <RecentActivityPanel
-          tenantId={authenticatedUser.tenantId ?? authenticatedUser.id}
-          className="hidden xl:flex sticky top-24 self-start max-h-[calc(100vh-9rem)]"
-        />
       </div>
+
+      {/* Recent activity drawer — slides in from the right on demand. The
+          realtime subscription only mounts while the drawer is open, so we
+          don't pay for the channel when the coach isn't watching. */}
+      <AnimatePresence>
+        {showActivity && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[150] bg-background/70 backdrop-blur-sm"
+              onClick={() => setShowActivity(false)}
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', stiffness: 320, damping: 36 }}
+              className="fixed top-0 right-0 bottom-0 z-[151] w-full max-w-md flex flex-col"
+            >
+              <RecentActivityPanel
+                tenantId={authenticatedUser.tenantId ?? authenticatedUser.id}
+                className="flex-1 h-full"
+                onClose={() => setShowActivity(false)}
+              />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Archived blocks modal */}
+      {showArchived && selectedClient && (
+        <ArchivedBlocksModal
+          client={selectedClient}
+          onClose={() => setShowArchived(false)}
+          onRestore={async (clientId, programId) => {
+            await onRestoreProgram?.(clientId, programId);
+          }}
+        />
+      )}
 
       {/* Version footer */}
       <div className="text-center text-[10px] font-mono text-muted-foreground/50 uppercase tracking-widest pt-4">

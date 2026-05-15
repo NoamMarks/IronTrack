@@ -13,6 +13,9 @@ interface RecentActivityPanelProps {
   /** Optional className applied to the outer panel — used by AdminView to
    *  toggle visibility on smaller breakpoints. */
   className?: string;
+  /** When provided, renders a close button in the header. Used by the
+   *  slide-out drawer presentation in AdminView. */
+  onClose?: () => void;
 }
 
 /**
@@ -25,7 +28,7 @@ interface RecentActivityPanelProps {
  * is persisted to `days.coach_note` and displayed read-only in the
  * trainee's Workout History modal.
  */
-export function RecentActivityPanel({ tenantId, className }: RecentActivityPanelProps) {
+export function RecentActivityPanel({ tenantId, className, onClose }: RecentActivityPanelProps) {
   const { entries, isInitialLoad } = useRecentActivity(tenantId);
 
   // dayId → true when the feedback textarea is expanded for that entry.
@@ -64,7 +67,7 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
   return (
     <aside
       data-testid="recent-activity-panel"
-      className={cn('flex flex-col bg-card border border-border border-t-2 border-t-primary/40 overflow-hidden', className)}
+      className={cn('flex flex-col bg-card border border-border border-t-2 border-t-primary/40', className)}
     >
       <header className="flex items-center justify-between px-4 py-3 border-b border-primary/20 bg-surface/60">
         <div className="flex items-center gap-2">
@@ -73,9 +76,21 @@ export function RecentActivityPanel({ tenantId, className }: RecentActivityPanel
             Recent Activity
           </h2>
         </div>
-        <div className="flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-widest text-accent">
-          <Radio className="w-3 h-3 animate-pulse" />
-          Live
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-widest text-accent">
+            <Radio className="w-3 h-3 animate-pulse" />
+            Live
+          </div>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="text-muted-foreground hover:text-foreground"
+              data-testid="close-activity-drawer"
+              aria-label="Close activity drawer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </header>
 

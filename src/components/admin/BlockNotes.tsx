@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '../ui';
 import type { Program } from '../../types';
 
@@ -17,6 +17,18 @@ export function BlockNotes({ program, onSave }: BlockNotesProps) {
   const [draft, setDraft] = useState(program.coachNotes ?? '');
   const [saving, setSaving] = useState(false);
   const isDirty = draft.trim() !== (program.coachNotes ?? '').trim();
+
+  // Re-sync draft when the program changes (coach switches active block) or
+  // when the persisted coachNotes is updated from elsewhere (another tab, a
+  // background save). useState initializers only fire on first mount, so
+  // without this effect the textarea would keep showing the previous block's
+  // notes after the parent passes a new `program` prop. Key on `program.id`
+  // (stable across object identity changes) plus `coachNotes` (so an external
+  // save flows back in) — NOT the whole `program` object, whose referential
+  // equality would thrash on every render.
+  useEffect(() => {
+    setDraft(program.coachNotes ?? '');
+  }, [program.id, program.coachNotes]);
 
   return (
     <div className="space-y-3 p-4 bg-surface border border-primary/15">

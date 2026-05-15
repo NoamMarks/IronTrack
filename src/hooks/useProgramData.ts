@@ -416,6 +416,26 @@ export function useProgramData(authenticatedUser: Client | null) {
     [],
   );
 
+  /** Reverse of archiveProgram — flips status back to 'active' and clears
+   *  archived_at. Does NOT restore the client's `active_program_id` because
+   *  another program may have taken that slot in the meantime; surfacing
+   *  the restored block in the coach's editor is the caller's job. */
+  const restoreProgram = useCallback(async (clientId: string, programId: string) => {
+    const { error } = await supabase
+      .from('programs')
+      .update({ status: 'active', archived_at: null })
+      .eq('id', programId);
+    if (error) throw error;
+    setClients((prev) => prev.map((c) =>
+      c.id !== clientId ? c : {
+        ...c,
+        programs: c.programs.map((p) =>
+          p.id !== programId ? p : { ...p, status: 'active' as const, archivedAt: undefined },
+        ),
+      }
+    ));
+  }, []);
+
   const deleteClient = useCallback(async (clientId: string) => {
     const { error } = await supabase.from('profiles').delete().eq('id', clientId);
     if (error) throw error;
@@ -824,6 +844,7 @@ export function useProgramData(authenticatedUser: Client | null) {
     saveProgram,
     saveSession,
     archiveProgram,
+    restoreProgram,
     deleteClient,
     createProgram,
     createProgramFromTemplate,

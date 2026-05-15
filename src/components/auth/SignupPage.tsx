@@ -107,7 +107,7 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
 
     if (errs.length > 0) { setErrors(errs); return; }
 
-    // Invite is valid → ask Supabase Auth to generate + email a 6-digit OTP
+    // Invite is valid → ask Supabase Auth to generate + email an 8-digit OTP
     // (delivered via the project's configured SMTP provider). Supabase also
     // creates the auth user up front (shouldCreateUser: true) and waits for
     // verifyOtp to confirm the email.
@@ -305,7 +305,7 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
               <TechnicalCard>
                 <div className="p-8 space-y-6">
                   <p className="text-xs font-mono text-muted-foreground">
-                    A 6-digit verification code has been sent to <span className="text-foreground font-bold">{email}</span>.
+                    An 8-digit verification code has been sent to <span className="text-foreground font-bold">{email}</span>.
                     If you don't see the email, check your spam folder.
                   </p>
 
@@ -316,8 +316,12 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
                     <div className="bg-muted/30 p-4 border border-border">
                       <TechnicalInput
                         value={otp}
-                        onChange={setOtp}
-                        placeholder="000000"
+                        onChange={(v) => setOtp(v.replace(/\D/g, '').slice(0, 8))}
+                        placeholder="00000000"
+                        maxLength={8}
+                        inputMode="numeric"
+                        pattern="[0-9]{8}"
+                        autoComplete="one-time-code"
                         data-testid="signup-otp"
                         className="text-center text-2xl tracking-[0.5em]"
                       />
@@ -330,7 +334,7 @@ export function SignupPage({ onComplete, onBack, theme, onToggleTheme, existingE
 
                   <button
                     onClick={handleVerify}
-                    disabled={submitting || otp.length !== 6}
+                    disabled={submitting || otp.length !== 8}
                     data-testid="signup-verify-btn"
                     className="btn-press w-full bg-accent text-accent-foreground py-4 text-xs font-bold uppercase tracking-widest rounded-input hover:opacity-90 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
                   >

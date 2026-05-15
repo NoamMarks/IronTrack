@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '../ui';
 
 interface ClientNotesProps {
@@ -11,6 +11,17 @@ export function ClientNotes({ clientId, coachId }: ClientNotesProps) {
   const [notes, setNotes] = useState(() => localStorage.getItem(storageKey) ?? '');
   const [draft, setDraft] = useState(() => localStorage.getItem(storageKey) ?? '');
   const [saved, setSaved] = useState(true);
+
+  // Re-sync state when the storage key changes (coach switches trainee).
+  // useState initializers only run on first mount — without this effect, React
+  // reuses the same component instance across selections and the textarea
+  // keeps showing the previously-selected trainee's notes.
+  useEffect(() => {
+    const stored = localStorage.getItem(storageKey) ?? '';
+    setNotes(stored);
+    setDraft(stored);
+    setSaved(true);
+  }, [storageKey]);
 
   const handleSave = () => {
     localStorage.setItem(storageKey, draft);

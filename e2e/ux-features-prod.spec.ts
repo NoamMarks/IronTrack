@@ -321,6 +321,25 @@ async function provisionCarolProgram(clientId: string, tenantId: string): Promis
 
 // ─── Browser helpers ─────────────────────────────────────────────────────
 
+/** Open the command palette via the same handler real Ctrl/Cmd+K invokes.
+ *
+ *  Playwright's `page.keyboard.press('Control+K')` doesn't deliver the
+ *  event to the page's `window.addEventListener('keydown', ...)` listener
+ *  in headless Chromium (the browser chrome layer intercepts Ctrl+K for
+ *  the URL bar before the page sees it). Dispatching the KeyboardEvent
+ *  directly bypasses that intercept while invoking the EXACT same
+ *  production hook code path — useCommandPalette listens on `window`
+ *  and toggles state when (metaKey || ctrlKey) && key === 'k'.
+ *
+ *  Real users hit Ctrl+K and it works; this is a Playwright-simulation
+ *  workaround, not a production bug.
+ */
+async function pressCmdK(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+  });
+}
+
 async function login(page: Page, email: string, password = PASSWORD): Promise<void> {
   await page.goto('/');
   await expect(page.getByTestId('open-login-btn')).toBeVisible({ timeout: 20_000 });
@@ -517,6 +536,10 @@ test.describe.serial('UX comfort features — production E2E', () => {
     await page.getByText(NAME.alice).first().click();
     await page.getByTestId('admin-btn').click();
     await expect(page.getByText(/Admin Panel/i)).toBeVisible({ timeout: 15_000 });
+    // AdminView's local selectedClient defaults to trainees[0] which depends
+    // on fetch ordering — click Alice's sidebar card explicitly so the test
+    // is deterministic across reorderings of the trainee list.
+    await page.getByText(NAME.alice).first().click();
 
     // ── 1a. dnd-kit infrastructure: GripVertical handles present on every row.
     const benchRow = page.getByTestId('exercise-row-0');
@@ -549,83 +572,43 @@ test.describe.serial('UX comfort features — production E2E', () => {
     const initialNames = (initialOrder.data ?? []).map((r) => (r as { exercise_name: string }).exercise_name);
     expect(initialNames).toEqual([`Bench-${TS}`, `Squat-${TS}`, `Deadlift-${TS}`]);
 
-    // ── 1c. Try Playwright's manual pointer drag (Bench → past Deadlift).
-    //     If dnd-kit consumes the events as expected, we get a real drag.
-    //     If not, we fall back to chevron-button reorder below.
-    const benchBox = await benchHandle.boundingBox();
-    const deadliftBox = await deadliftRow.boundingBox();
-    let draggedViaPointer = false;
-    if (benchBox && deadliftBox) {
-      const startX = benchBox.x + benchBox.width / 2;
-      const startY = benchBox.y + benchBox.height / 2;
-      const endX = deadliftBox.x + deadliftBox.width / 2;
-      const endY = deadliftBox.y + deadliftBox.height + 4; // past the bottom of Deadlift
-      await page.mouse.move(startX, startY);
-      await page.mouse.down();
-      // dnd-kit's PointerSensor needs >=8px movement to activate.
-      await page.mouse.move(startX + 12, startY + 12, { steps: 5 });
-      await page.mouse.move(endX, endY, { steps: 20 });
-      await page.mouse.up();
-      // Settle 500ms for dnd-kit to fire onDragEnd + the debounced save.
-      await page.waitForTimeout(700);
-      const afterDrag = await admin
-        .from('exercises')
-        .select('exercise_name, position')
-        .eq('day_id', F.aliceDayId!)
-        .order('position');
-      const afterDragNames = (afterDrag.data ?? []).map((r) => (r as { exercise_name: string }).exercise_name);
-      draggedViaPointer = afterDragNames[2] === `Bench-${TS}`;
-      if (draggedViaPointer) {
-        // Drag worked → also verify save indicator flashed.
-        // The indicator is `save-status-1` (parent day's dayNumber=1).
-        // We may have already missed the 'Saving...' window, but '✓ Saved'
-        // should still be visible at the 700ms mark.
-        const status = page.getByTestId('save-status-1');
-        const text = (await status.count()) > 0 ? await status.textContent() : null;
-        console.log(`[QA s1] pointer drag worked. save-status-1 text="${text}"`);
-      }
-    }
-
-    // ── 1d. Chevron fallback path — works regardless of pointer drag outcome.
-    //     Reset DB via service-role first so the chevron test has a clean slate.
-    if (draggedViaPointer) {
-      await admin.from('exercises').update({ position: 0 }).eq('id', F.aliceExerciseIds!.bench);
-      await admin.from('exercises').update({ position: 1 }).eq('id', F.aliceExerciseIds!.squat);
-      await admin.from('exercises').update({ position: 2 }).eq('id', F.aliceExerciseIds!.deadlift);
-      await page.reload();
-      await page.getByText(NAME.alice).first().click();
-      await page.getByTestId('admin-btn').click();
-      await expect(page.getByTestId('exercise-row-0')).toBeVisible({ timeout: 10_000 });
-    }
-
-    // Use the chevron buttons: click bench's ChevronDown twice (Bench is row 0).
-    // The chevron is the 1st button inside the .flex.flex-col stack of row 0.
-    const benchChevronDown = page
+    // ── 1c. Chevron-button reorder (deterministic; bypasses dnd-kit pointer
+    //     sensor flakiness with Playwright). The infra check above already
+    //     confirmed the drag handles + SortableContext are wired up.
+    //     The chevron is the second button inside the .flex.flex-col stack
+    //     of row 0 (after the up chevron).
+    await page
       .getByTestId('exercise-row-0')
       .locator('div.flex.flex-col button')
-      .nth(1);
-    await benchChevronDown.click(); // Bench → position 1
+      .nth(1)
+      .click(); // Bench → position 1
     await page.waitForTimeout(150);
-    // After first click, Bench is row 1, so click the down button of row 1 now.
+    // After first click, Bench is row 1 — click the down button of row 1.
     await page
       .getByTestId('exercise-row-1')
       .locator('div.flex.flex-col button')
       .nth(1)
       .click();
 
-    // Debounced save (500ms) needs to settle before we read SQL.
-    await page.waitForTimeout(1500);
+    // ── 1d. Verify SQL reflects the new order. The save fires after the
+    //     500ms debounce + ~9 sequential round-trips (program PATCH +
+    //     weeks/days/exercises sync) which can take 1.5–3s over the prod
+    //     network. Poll instead of a fixed sleep.
+    await expect
+      .poll(
+        async () => {
+          const { data } = await admin
+            .from('exercises')
+            .select('exercise_name, position')
+            .eq('day_id', F.aliceDayId!)
+            .order('position');
+          return (data ?? []).map((r) => (r as { exercise_name: string }).exercise_name);
+        },
+        { timeout: 10_000 },
+      )
+      .toEqual([`Squat-${TS}`, `Deadlift-${TS}`, `Bench-${TS}`]);
 
-    // ── 1e. Verify SQL reflects the new order.
-    const finalOrder = await admin
-      .from('exercises')
-      .select('exercise_name, position')
-      .eq('day_id', F.aliceDayId!)
-      .order('position');
-    const finalNames = (finalOrder.data ?? []).map((r) => (r as { exercise_name: string }).exercise_name);
-    expect(finalNames).toEqual([`Squat-${TS}`, `Deadlift-${TS}`, `Bench-${TS}`]);
-
-    // ── 1f. Verify DOM order matches.
+    // ── 1e. Verify DOM order matches the optimistic local state.
     await expect(page.getByTestId('exercise-row-0').locator('input').first()).toHaveValue(`Squat-${TS}`);
     await expect(page.getByTestId('exercise-row-1').locator('input').first()).toHaveValue(`Deadlift-${TS}`);
     await expect(page.getByTestId('exercise-row-2').locator('input').first()).toHaveValue(`Bench-${TS}`);
@@ -638,9 +621,22 @@ test.describe.serial('UX comfort features — production E2E', () => {
     await page.getByText(NAME.bob).first().click();
     await page.getByTestId('admin-btn').click();
     await expect(page.getByText(/Admin Panel/i)).toBeVisible({ timeout: 15_000 });
+    // AdminView's default selectedClient is trainees[0] (Alice). Switch
+    // to Bob explicitly via the sidebar card; without this the editor
+    // shows Alice's single-day program and the day-down button is disabled.
+    await page.getByText(NAME.bob).first().click();
+    // Wait for Bob's program editor to materialise. ProgramEditor renders
+    // every week stacked vertically, so day-card-1/2/3 each match TWICE
+    // (once per week). Assert the multiplicity directly.
+    await expect(page.getByTestId('day-card-1').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('day-card-1')).toHaveCount(2);
+    await expect(page.getByTestId('day-card-2')).toHaveCount(2);
+    await expect(page.getByTestId('day-card-3')).toHaveCount(2);
 
-    // ── 2a. dnd-kit infrastructure on day cards.
-    const dayADragHandle = page.getByTestId('day-drag-handle-1');
+    // ── 2a. dnd-kit infrastructure on day cards. Same multiplicity as
+    //     the cards: 2 drag handles per dayNumber (one per week).
+    await expect(page.getByTestId('day-drag-handle-1')).toHaveCount(2);
+    const dayADragHandle = page.getByTestId('day-drag-handle-1').first();
     await expect(dayADragHandle).toBeVisible({ timeout: 10_000 });
     await expect(dayADragHandle).toHaveAttribute('aria-roledescription', 'sortable');
 
@@ -667,41 +663,62 @@ test.describe.serial('UX comfort features — production E2E', () => {
     }
 
     // ── 2c. Chevron-driven reorder (most reliable cross-browser): move
-    //     Day A from position 1 → 2 → 3.
-    await page.getByTestId('day-down-btn-1').click(); // Day A ↔ Day B  (A becomes #2)
+    //     Day A from position 1 → 2 → 3. `day-down-btn-{n}` has 2 matches
+    //     (one per week) — either fires the same dayNumber swap across
+    //     every week, so .first() is sufficient.
+    await page.getByTestId('day-down-btn-1').first().click(); // Day A ↔ Day B
     await page.waitForTimeout(200);
     // After the swap, Day A's testid is now day-down-btn-2.
-    await page.getByTestId('day-down-btn-2').click(); // Day A ↔ Day C  (A becomes #3)
+    await page.getByTestId('day-down-btn-2').first().click(); // Day A ↔ Day C
 
-    // Settle the debounced program save (~500ms) plus a buffer.
-    await page.waitForTimeout(1500);
+    // ── 2d. Verify cross-week sync via SQL — same poll approach as
+    //     Scenario 1 (saves over prod network can take 1.5–3s end-to-end).
+    //     Expected: every week has Day B at #1, Day C at #2, Day A at #3.
+    await expect
+      .poll(
+        async () => {
+          const { data } = await admin
+            .from('days')
+            .select('week_id, day_number, name')
+            .in('week_id', F.bobWeekIds!);
+          const byWeek = new Map<string, Array<{ day_number: number; name: string }>>();
+          for (const r of (data ?? []) as Array<{
+            week_id: string;
+            day_number: number;
+            name: string;
+          }>) {
+            const arr = byWeek.get(r.week_id) ?? [];
+            arr.push({ day_number: r.day_number, name: r.name });
+            byWeek.set(r.week_id, arr);
+          }
+          // Project into a comparable shape: array of per-week ordered names.
+          return Array.from(byWeek.values())
+            .map((arr) =>
+              arr
+                .sort((a, b) => a.day_number - b.day_number)
+                .map((d) => d.name)
+                .join('|'),
+            )
+            .sort();
+        },
+        { timeout: 10_000 },
+      )
+      .toEqual([
+        `Day B ${TS}|Day C ${TS}|Day A ${TS}`,
+        `Day B ${TS}|Day C ${TS}|Day A ${TS}`,
+      ]);
 
-    // ── 2d. Verify cross-week sync via SQL: every week has Day B at #1,
-    //     Day C at #2, Day A at #3.
-    const after = await admin
-      .from('days')
-      .select('week_id, day_number, name')
-      .in('week_id', F.bobWeekIds!);
-    const byWeekAfter = new Map<string, Array<{ day_number: number; name: string }>>();
-    for (const r of (after.data ?? []) as Array<{ week_id: string; day_number: number; name: string }>) {
-      const arr = byWeekAfter.get(r.week_id) ?? [];
-      arr.push({ day_number: r.day_number, name: r.name });
-      byWeekAfter.set(r.week_id, arr);
-    }
-    // Should have exactly 2 weeks.
-    expect(byWeekAfter.size).toBe(2);
-    for (const [weekId, arr] of byWeekAfter) {
-      arr.sort((a, b) => a.day_number - b.day_number);
-      expect(
-        arr.map((d) => d.name),
-        `week ${weekId} day order`,
-      ).toEqual([`Day B ${TS}`, `Day C ${TS}`, `Day A ${TS}`]);
-    }
-
-    // ── 2e. DOM shows the new order in the currently visible week.
-    await expect(page.getByTestId('day-card-1').locator('input').first()).toHaveValue(`Day B ${TS}`);
-    await expect(page.getByTestId('day-card-2').locator('input').first()).toHaveValue(`Day C ${TS}`);
-    await expect(page.getByTestId('day-card-3').locator('input').first()).toHaveValue(`Day A ${TS}`);
+    // ── 2e. DOM shows the new order. Day cards appear once per week, so
+    //     pick the first match (week 1) for the assertion.
+    await expect(
+      page.getByTestId('day-card-1').first().locator('input').first(),
+    ).toHaveValue(`Day B ${TS}`);
+    await expect(
+      page.getByTestId('day-card-2').first().locator('input').first(),
+    ).toHaveValue(`Day C ${TS}`);
+    await expect(
+      page.getByTestId('day-card-3').first().locator('input').first(),
+    ).toHaveValue(`Day A ${TS}`);
   });
 
   // ─── Scenario 3: Command palette open + search + select + recent ────
@@ -710,7 +727,7 @@ test.describe.serial('UX comfort features — production E2E', () => {
     await expect(page.getByText(/Clients/i).first()).toBeVisible({ timeout: 15_000 });
 
     // ── 3a. Cmd+K (Meta+K) opens the palette with autofocus on input.
-    await page.keyboard.press('Meta+K');
+    await pressCmdK(page);
     await expect(page.getByTestId('command-palette')).toBeVisible({ timeout: 5_000 });
     const input = page.getByTestId('command-palette-input');
     await expect(input).toBeFocused();
@@ -732,7 +749,7 @@ test.describe.serial('UX comfort features — production E2E', () => {
     });
 
     // ── 3d. Re-open the palette — Bob now appears in RECENT with input empty.
-    await page.keyboard.press('Meta+K');
+    await pressCmdK(page);
     await expect(page.getByTestId('command-palette')).toBeVisible({ timeout: 5_000 });
     await expect(page.getByTestId('command-palette-input')).toHaveValue('');
     // The RECENT heading should be present and Bob should be the first visible item.
@@ -754,7 +771,7 @@ test.describe.serial('UX comfort features — production E2E', () => {
     // Scenario 3) is visible — plus we type 'qa' to widen results to all
     // three QA-tagged trainees + actions, giving us enough items to navigate
     // through in a deterministic order.
-    await page.keyboard.press('Meta+K');
+    await pressCmdK(page);
     await expect(page.getByTestId('command-palette')).toBeVisible({ timeout: 5_000 });
     // Use a query that matches all three trainees plus is stable across runs.
     // 'ux-' is in each of the QA trainees' email subtitles.
@@ -804,7 +821,7 @@ test.describe.serial('UX comfort features — production E2E', () => {
     }
 
     // ── 4b. Re-open and verify Escape dismisses without committing.
-    await page.keyboard.press('Meta+K');
+    await pressCmdK(page);
     await expect(page.getByTestId('command-palette')).toBeVisible({ timeout: 5_000 });
     // Stash what URL/hash we're on; Escape should not navigate.
     const beforeEscape = page.url();
