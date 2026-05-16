@@ -161,7 +161,6 @@ describe('parseNumeric', () => {
 describe('kindForColumnId', () => {
   it('maps the legacy plan/actual columns', () => {
     expect(kindForColumnId('sets')).toBe('sets');
-    expect(kindForColumnId('reps')).toBe('reps');
     expect(kindForColumnId('expectedRpe')).toBe('rpe');
     expect(kindForColumnId('actualRpe')).toBe('rpe');
     expect(kindForColumnId('actualLoad')).toBe('load');
@@ -171,6 +170,9 @@ describe('kindForColumnId', () => {
     expect(kindForColumnId('exerciseName')).toBeUndefined();
     expect(kindForColumnId('notes')).toBeUndefined();
     expect(kindForColumnId('weightRange')).toBeUndefined();
+    // `reps` is intentionally free text so coaches can type "6-8", "AMRAP",
+    // "5+", etc. Numeric extraction for analytics happens in parseReps().
+    expect(kindForColumnId('reps')).toBeUndefined();
     // Custom user-defined column with UUID id
     expect(kindForColumnId('a1b2c3d4-1234-5678-9abc-def012345678')).toBeUndefined();
   });

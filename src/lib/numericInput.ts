@@ -64,7 +64,11 @@ export const RANGES: Record<NumericFieldKind, NumericRange> = {
  */
 export function kindForColumnId(colId: string): NumericFieldKind | undefined {
   if (colId === 'sets')        return 'sets';
-  if (colId === 'reps')        return 'reps';
+  // 'reps' intentionally omitted — coaches need to enter ranges ("6-8"),
+  // notation ("AMRAP"), and modifiers ("5+"). parseReps() in analytics.ts
+  // extracts the leading number for e1RM math; the input layer must not
+  // strip the rest. The `reps` kind stays defined in RANGES because other
+  // call sites still reference it directly.
   if (colId === 'expectedRpe') return 'rpe';
   if (colId === 'actualRpe')   return 'rpe';
   if (colId === 'actualLoad')  return 'load';
