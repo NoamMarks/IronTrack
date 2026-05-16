@@ -1706,7 +1706,7 @@ export default function App() {
           onSaveProgram={saveProgram}
           onCreateProgram={createProgram}
           onCreateProgramFromTemplate={createProgramFromTemplate}
-          onDuplicateProgram={async (clientId, program) => { await duplicateProgram(clientId, program); }}
+          onDuplicateProgram={async (clientId, program) => duplicateProgram(clientId, program)}
           onSaveBlockNotes={saveBlockNotes}
           onDeleteClient={deleteClient}
           onArchiveProgram={archiveProgram}
