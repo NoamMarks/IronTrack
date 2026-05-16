@@ -69,8 +69,13 @@ export function kindForColumnId(colId: string): NumericFieldKind | undefined {
   // extracts the leading number for e1RM math; the input layer must not
   // strip the rest. The `reps` kind stays defined in RANGES because other
   // call sites still reference it directly.
-  if (colId === 'expectedRpe') return 'rpe';
-  if (colId === 'actualRpe')   return 'rpe';
+  //
+  // 'expectedRpe' and 'actualRpe' intentionally omitted for the same reason:
+  // coaches prescribe ranges ("7-8", "@8", "RPE 7-9") and trainees may log
+  // ranges across reps. parseLoad() in analytics.ts extracts the leading
+  // number for autoregulation math via its regex; numeric stripping would
+  // destroy the prescription notation. The `rpe` kind stays defined in
+  // RANGES because other call sites reference it directly.
   if (colId === 'actualLoad')  return 'load';
   return undefined;
 }
