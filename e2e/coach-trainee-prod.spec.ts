@@ -541,6 +541,9 @@ test.describe.serial('Coach × Trainee production E2E', () => {
       //    the trainee submits.
       await loginThroughSpa(coachPage, EMAIL.coachA, PASSWORD);
       await coachPage.getByTestId('admin-btn').click();
+      // Recent Activity moved to a drawer in the recent UI refresh — open it
+      // explicitly via the toolbar button, then assert the panel rendered.
+      await coachPage.getByTestId('open-activity-drawer').click();
       await expect(coachPage.getByTestId('recent-activity-panel')).toBeVisible({ timeout: 15_000 });
 
       // ── Trainee logs in and opens the day-1 logger.
@@ -552,22 +555,58 @@ test.describe.serial('Coach × Trainee production E2E', () => {
       // Fill load + RPE + completion toggle for all sets of the day's two
       // exercises so the Finish button doesn't trigger the "partially
       // logged" confirm. The fixture's day-1 has 2 exercises × 3 sets each.
+      //
+      // Production now ships the smart rest timer (v2): the timer panel
+      // auto-expands on the first set-done click and covers the right side
+      // of the screen, blocking subsequent toggle clicks on exercise 2.
+      // Collapse the rest-timer panel between exercises by clicking the
+      // FAB (toggle) when it's open.
+      /** Collapse the rest-timer panel if it's open. The smart-rest-timer
+       *  auto-opens after every set-done click in v2 and covers the right
+       *  side of the screen — including subsequent rows' load/RPE inputs
+       *  AND their toggle buttons. Call this BEFORE any click that needs
+       *  to land in the covered region. */
+      const collapseTimerIfOpen = async (): Promise<void> => {
+        if (await traineePage.getByTestId('rest-timer-panel').count()) {
+          await traineePage.getByTestId('rest-timer-fab').click();
+          // Give the exit animation a moment so the next pointer event
+          // doesn't race the still-mounted overlay.
+          await traineePage.waitForTimeout(100);
+        }
+      };
+
       const [ex1, ex2] = [F.exerciseAIds![0], F.exerciseAIds![1]];
       for (const exId of [ex1, ex2]) {
         for (const setN of [1, 2, 3]) {
+          await collapseTimerIfOpen();
           await traineePage.getByTestId(`input-${exId}-set-${setN}-load`).fill('100');
+          await collapseTimerIfOpen();
           await traineePage.getByTestId(`input-${exId}-set-${setN}-rpe`).fill('8');
+          await collapseTimerIfOpen();
           await traineePage.getByTestId(`set-done-toggle-${exId}-${setN}`).click();
         }
       }
+      // Final collapse before clicking Finish so the timer panel can't
+      // cover the WorkoutSummary overlay buttons.
+      await collapseTimerIfOpen();
 
       // Belt-and-suspenders: also accept any window.confirm in case some
-      // sets failed to flip to "done" (e.g. timing race on the optimistic
-      // toggle handler). The confirm copy is "N of M sets logged…".
+      // sets failed to flip to "done" (e.g. the rest-timer overlay
+      // intercepts pointer events on the second exercise's toggles, which
+      // is what we see in production today — the timer fab pops up after
+      // the first set-done click and covers the next rows). The confirm
+      // copy is "N of M sets logged…".
       traineePage.once('dialog', (d) => void d.accept());
 
-      // Finish workout — opens reflection modal.
+      // Finish workout — production now shows a WorkoutSummary overlay
+      // BEFORE the reflection modal (this is the Summary screen Dev 2
+      // mentioned was supposedly not in the deploy — it is). Click
+      // through Summary's "Submit Reflection" CTA to reach the reflection
+      // step. We do not assert anything about Summary content here; that
+      // belongs to a dedicated Workout Flow v2 spec.
       await traineePage.getByTestId('finish-session-btn').click();
+      await expect(traineePage.getByTestId('workout-summary')).toBeVisible({ timeout: 10_000 });
+      await traineePage.getByTestId('summary-submit-reflection-btn').click();
       await expect(traineePage.getByTestId('reflection-modal')).toBeVisible({ timeout: 10_000 });
 
       // Submit difficulty 4 + note.
@@ -604,6 +643,8 @@ test.describe.serial('Coach × Trainee production E2E', () => {
 
       await loginThroughSpa(coachPage, EMAIL.coachA, PASSWORD);
       await coachPage.getByTestId('admin-btn').click();
+      // Open the activity drawer (recent UI refresh — formerly always-visible).
+      await coachPage.getByTestId('open-activity-drawer').click();
       const entry = coachPage.getByTestId(`activity-entry-${F.dayAIds![0]}`);
       await expect(entry).toBeVisible({ timeout: 15_000 });
       await coachPage.getByTestId(`add-feedback-btn-${F.dayAIds![0]}`).click();
@@ -665,10 +706,25 @@ test.describe.serial('Coach × Trainee production E2E', () => {
       // client list, NOT QA Trainee A.
       await expect(page.getByText(NAME.traineeA)).toHaveCount(0);
 
-      // Open admin panel — recent activity must NOT show Coach A's reflection.
+      // Open admin panel. AdminView only renders its toolbar (Activity /
+      // Cohort / Archive) when a program is being edited; for a fresh
+      // coach with zero trainees that toolbar is hidden and we see the
+      // "Ready to build?" empty state instead. Both branches prove the
+      // tenant filter held — the activity drawer either shows no entries
+      // OR doesn't render at all.
       await page.getByTestId('admin-btn').click();
-      await expect(page.getByTestId('recent-activity-panel')).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByTestId(`activity-entry-${F.dayAIds![0]}`)).toHaveCount(0);
+      await expect(page.getByText(/Admin Panel/i)).toBeVisible({ timeout: 15_000 });
+      const activityTrigger = page.getByTestId('open-activity-drawer');
+      if (await activityTrigger.count()) {
+        await activityTrigger.click();
+        await expect(page.getByTestId('recent-activity-panel')).toBeVisible({ timeout: 10_000 });
+        await expect(page.getByTestId(`activity-entry-${F.dayAIds![0]}`)).toHaveCount(0);
+      } else {
+        // Empty-state — confirm we landed there and that Coach A's trainee
+        // name doesn't bleed through.
+        await expect(page.getByText(/Ready to Build|No program assigned/i).first()).toBeVisible();
+        await expect(page.getByText(NAME.traineeA)).toHaveCount(0);
+      }
 
       // ── /api/send-notification cross-tenant probe
       const coachBToken = await readAccessTokenFromBrowser(ctx);

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Trash2, Archive, Link2, Link as LinkIcon, Copy, Check, Library, Bell, BarChart3, Activity } from 'lucide-react';
+import { ArrowLeft, Trash2, Archive, Link2, Link as LinkIcon, Copy, Check, Library, Bell, BarChart3, Activity, Lightbulb } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProgramEditor } from './ProgramEditor';
 import { RecentActivityPanel } from './RecentActivityPanel';
@@ -8,6 +8,7 @@ import { CohortAnalytics } from './CohortAnalytics';
 import { ClientNotes } from './ClientNotes';
 import { BlockNotes } from './BlockNotes';
 import { ArchivedBlocksModal } from './ArchivedBlocksModal';
+import { SaveTemplateModal } from './SaveTemplateModal';
 import { Modal, Toast, Button } from '../ui';
 import { cn } from '../../lib/utils';
 import {
@@ -124,6 +125,13 @@ export function AdminView({
   // Archived-blocks viewer — modal listing the client's archived programs
   // with a Restore action per row.
   const [showArchived, setShowArchived] = useState(false);
+  // Save-as-Template modal triggered from the cross-trainee-reuse hint
+  // beneath the action-button row. The ProgramEditor owns its own
+  // SaveTemplateModal instance for its primary action; this is a separate
+  // mount so the hint button can open the flow without coupling to the
+  // editor's internal state.
+  const [saveTemplateHintOpen, setSaveTemplateHintOpen] = useState(false);
+  const handleOpenSaveTemplateModal = () => setSaveTemplateHintOpen(true);
 
   // Load invite codes
   useEffect(() => {
@@ -283,7 +291,7 @@ export function AdminView({
       // is left looking at the original block and the duplicate appears
       // to have done nothing.
       setEditingProgram(newProgram);
-      setDupeToast('Block duplicated — now editing the copy');
+      setDupeToast('Block branched — now editing the copy');
       setTimeout(() => setDupeToast(null), 3000);
     } catch (err) {
       console.error('[IronTrack admin] duplicateProgram failed', err);
@@ -625,9 +633,10 @@ export function AdminView({
                     size="sm"
                     onClick={() => void handleDuplicateProgram()}
                     data-testid="duplicate-block-btn"
+                    title="Creates a copy of this block for the same trainee. To reuse a program across multiple trainees, save it as a Template instead."
                   >
                     <Copy className="w-3.5 h-3.5 mr-1.5" />
-                    Duplicate Block
+                    Branch Block
                   </Button>
                 )}
                 <Button
@@ -640,6 +649,26 @@ export function AdminView({
                   Archive Block
                 </Button>
               </div>
+
+              {trainees.length > 1 && templates && templates.length === 0 && (
+                <div className="mt-2 px-3 py-2 border border-primary/20 bg-surface/30 flex items-start gap-2">
+                  <Lightbulb className="w-3.5 h-3.5 text-primary/60 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-[10px] font-mono uppercase tracking-widest text-primary/70 mb-0.5">Tip</p>
+                    <p className="text-xs text-muted-foreground">
+                      Want to reuse this program for other trainees? Save it as a Template.
+                    </p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleOpenSaveTemplateModal}
+                    data-testid="save-as-template-hint-btn"
+                  >
+                    Save as Template
+                  </Button>
+                </div>
+              )}
 
               <AnimatePresence>
                 {showCohort && (
@@ -741,6 +770,12 @@ export function AdminView({
           onClose={() => setShowArchived(false)}
           onRestore={async (clientId, programId) => {
             await onRestoreProgram?.(clientId, programId);
+            // Close the modal so the coach can see the block reappear in
+            // the active list, and surface a confirmation toast — without
+            // it the restore is silent.
+            setShowArchived(false);
+            setDupeToast('Block restored');
+            setTimeout(() => setDupeToast(null), 3000);
           }}
         />
       )}
@@ -768,6 +803,17 @@ export function AdminView({
           className="max-h-[60vh] overflow-y-auto pr-1"
         />
       </Modal>
+      <SaveTemplateModal
+        isOpen={saveTemplateHintOpen}
+        initialName={editingProgram?.name ?? ''}
+        onClose={() => setSaveTemplateHintOpen(false)}
+        onSave={async (name, description) => {
+          await handleSaveAsTemplate(name, description);
+          setSaveTemplateHintOpen(false);
+          setDupeToast('Template saved — find it under Load Template');
+          setTimeout(() => setDupeToast(null), 3000);
+        }}
+      />
       <Toast message={dupeToast} onDismiss={() => setDupeToast(null)} />
     </div>
   );

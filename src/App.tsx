@@ -1049,6 +1049,7 @@ export default function App() {
     saveProgram,
     saveSession,
     archiveProgram,
+    restoreProgram,
     deleteClient,
     createProgram,
     createProgramFromTemplate,
@@ -1710,6 +1711,7 @@ export default function App() {
           onSaveBlockNotes={saveBlockNotes}
           onDeleteClient={deleteClient}
           onArchiveProgram={archiveProgram}
+          onRestoreProgram={async (clientId, programId) => restoreProgram(clientId, programId)}
           onSendNotification={async (clientId, message) => {
             const { data: { session } } = await supabase.auth.getSession();
             const token = session?.access_token;

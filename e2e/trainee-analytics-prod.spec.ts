@@ -603,7 +603,13 @@ test.describe.serial('Trainee analytics surface — production E2E', () => {
     await expect(weightInput).toBeVisible({ timeout: 10_000 });
 
     // 1) Seed an older entry via service-role so we can verify sort order.
-    const oldDate = '2026-04-15';
+    //    BodyWeightLog only fetches the last 30 days (see hook body), so the
+    //    seed date MUST be inside that window. Compute relative to today
+    //    rather than hardcoding — a hardcoded 2026-04-15 silently fell out
+    //    of the window once the calendar rolled past 2026-05-15.
+    const oldDateObj = new Date();
+    oldDateObj.setDate(oldDateObj.getDate() - 7);
+    const oldDate = oldDateObj.toISOString().slice(0, 10);
     await admin.from('body_weight_log').upsert(
       { client_id: F.traineeId, weight_kg: 79.2, logged_at: oldDate },
       { onConflict: 'client_id,logged_at' },

@@ -28,7 +28,7 @@
 
 **What it is:** A strength-training program management web app. Coaches design periodized training programs (weeks → days → exercises with custom data columns). Trainees log their workouts, view analytics (e1RM, volume, DOTS), and track progress over time. Wraps to Android and iOS via Capacitor.
 
-**Status:** In production. Live at `https://irontrack.vercel.app`. Beta-ready as of 2026-05-09 pending final manual auth verification.
+**Status:** In production. Live at `https://irontrack.vercel.app`. Manual auth verification complete, Supabase email templates corrected, production verification clean across coach-trainee data flow, trainee analytics, and UX comfort features. Beta-ready as of 2026-05-17 pending the trusted-coach onboarding gate (PM call).
 
 **Stack at a glance:** React 18 + TypeScript + Vite + Tailwind CSS + Supabase (auth + DB + RLS) + Capacitor (mobile) + Vercel (hosting + serverless functions).
 
@@ -229,9 +229,11 @@ Superadmin can impersonate a coach. Implemented as a client-side `authenticatedU
 - Add trainee via invite code generation (copyable URL)
 - Program editor (weeks → days → exercises with custom columns)
 - Drag-and-drop reordering of exercises and days (with keyboard + touch fallback; day reorders propagate `dayNumber` across all weeks)
+- Sticky week tabs + collapsible week cards in the program editor — jump to any week instantly, collapse the rest to keep focus
 - Batch exercise import (paste newline-separated names)
 - Save/load/edit/delete program templates
-- Program duplication (with actuals stripped)
+- Block branching (same-trainee copy, used for variations and deload weeks)
+- Templates as the cross-trainee program reuse path — Branch is intentionally same-trainee only
 - Program archive
 - Archived blocks viewer with restore
 - Coach feedback on completed sessions (visible to trainee in history)
@@ -423,11 +425,13 @@ VITE_SENTRY_DSN=...                 # Error monitoring (optional)
 - **Drag-and-drop uses @dnd-kit, NOT Framer Motion.** Do not animate dragged items with motion — dnd-kit's transform handler will conflict. Sortable rows/cards render through the `SortableShell` render-prop helper in `ProgramEditor.tsx`; the up/down chevrons stay alongside the grip handle as a keyboard fallback (don't remove them).
 - **After archive/duplicate, `editingProgram` must be set to the next active program or the new copy** — falling back to `null` shows the empty state and reads as a UI bug to coaches. Use `activeProgramOf(fresh)` to pick the surviving block after archive; capture the duplicate return value to switch the editor to the copy.
 - **The `reps`, `expectedRpe`, and `actualRpe` fields are intentionally free text, not numeric.** Coaches enter prescriptions like `"6-8"`, `"AMRAP"`, `"5+"`, `"7-8"`, `"@8"`, `"RPE 7-9"` — all valid programming notation. `kindForColumnId` returns `undefined` for all three so the input layer doesn't strip non-digit characters. `analytics.ts:parseReps()` and `analytics.ts:parseLoad()` extract the leading number when needed for e1RM and autoregulation math. If you ever feel tempted to "fix" any of these to be numeric-only, this comment is here to tell you not to.
+- **Per-week DndContext stays mounted even when collapsed.** The collapsing `motion.div` in `ProgramEditor.tsx` hides the DndContext via height animation, but doesn't unmount it. This is intentional — unmounting/remounting would lose drag state if a coach happens to be mid-drag during a collapse. If you ever switch to true unmount (e.g. for memory savings on huge programs), make sure to gate drag interactions on `isExpanded` so in-flight drags can't terminate inside a closing card.
 - **Cmd+K / Ctrl+K is reserved for the command palette.** If you add another keyboard shortcut, check `useCommandPalette.ts` first — it owns the global keydown listener.
 - **Recharts `<ReferenceLine>` defaults to `ifOverflow="discard"`** — any reference line outside the data's Y-axis domain is silently hidden. If you add a goal/target line to a chart, set `ifOverflow="extendDomain"` so the axis expands to include it. We hit this with the 1RM goal feature: trainees setting aspirational goals saw no line until they'd already exceeded it.
 - **State-initialization trap on prop change.** `useState(initializer)` only runs once per component instance. If a parent passes a changing prop that should reset child state (e.g., `clientId` to `ClientNotes`, `program` to `BlockNotes`), you MUST add a `useEffect` keyed on that prop to re-sync state — otherwise the component silently shows stale data from the previous prop value. This was the root cause of two production bugs (coach notes and block notes mixing across selections). Apply this pattern to any future component whose internal state mirrors a prop.
 - **Supabase OTP length is 8 digits in this project (not the default 6).** The signup form's verification input enforces `maxLength={8}` and `pattern="[0-9]{8}"`. If you change auth providers or Supabase OTP config, sync `SignupPage.tsx` to match.
 - **Signup OTP delivery depends on the Supabase email template, not the call signature.** If the "Confirm signup" template contains `{{ .ConfirmationURL }}`, Supabase may render a magic-link button instead of (or alongside) the OTP code, and which one appears varies by email client. The template must contain only `{{ .Token }}` for OTP-only delivery. `SignupPage.tsx` has a defensive `useEffect` that detects an active session (magic-link click) and completes signup automatically — but the dashboard template is the source of truth. If a new signup variant is ever introduced, audit the email template first.
+- **"Branch" copies within a single trainee. "Templates" copies across trainees.** These are two different workflows — coaches asking "how do I copy a program to my other trainees" should be pointed to Save as Template + Load Template, not Branch. The button label was renamed from "Duplicate" to "Branch" specifically to make this distinction obvious.
 
 ---
 
@@ -460,31 +464,35 @@ VITE_SENTRY_DSN=...                 # Error monitoring (optional)
 
 ## Current State
 
-**As of 2026-05-09.**
+**As of 2026-05-17.**
 
-**Live at:** `https://irontrack.vercel.app` — build v1.0.25.
+**Live at:** `https://irontrack.vercel.app` — latest build v1.0.32+ (prebuild auto-bumps on every deploy).
 
-**Production health:** Green. SPA mounts cleanly, no console errors, all API endpoints respond correctly with structured errors for malformed input, 32 of 39 mock-suite E2E tests pass against production.
+**Production health:** Green. Across three production verification specs (`coach-trainee-prod.spec.ts`, `trainee-analytics-prod.spec.ts`, `ux-features-prod.spec.ts`) the most recent combined run reported **19 PASS / 1 SKIP (VAPID-gated) / 0 FAIL**. SPA mounts cleanly, no console errors, all API endpoints respond correctly with structured errors for malformed input, zero production residue from QA runs.
 
-**Pending before beta launch:**
-- Manual auth/email/real-data checklist by product owner (auth happy path, password reset content, invite code redemption, etc.)
-- Supabase email template updates (signup OTP must clearly display `{{ .Token }}`, reset password must include `{{ .ConfirmationURL }}`)
-- 7 test selector fixes by QA (test code only — not production bugs):
-  - Button text changes (`+ Add Week` → `+ Week`, `+ Add Day` → `+ Day`)
-  - Category pill in `ExerciseCombobox` intercepts fast Playwright clicks
-  - Numeric input strips negatives (intentional behavior change, test expectation outdated)
-  - Templates delete flow uses custom modal, not `window.confirm`
-  - `workout-history` heading selector ambiguity (matches both day card and modal heading)
+**Beta readiness:**
+- ✅ Manual auth verification (PM completed signup, login, password reset on production)
+- ✅ Supabase email templates corrected (both "Confirm signup" and "Magic Link" templates now display only `{{ .Token }}`; reset-password template includes `{{ .ConfirmationURL }}`)
+- ✅ All three production E2E specs clean against live data plane
+- ✅ Zero production bugs in latest QA cycle
+- ⏳ Trusted-coach onboarding (2–3 coaches) — PM call, not code-blocked
+- ⏳ Mobile Capacitor build verification on a real Android device — hardware concern, separate workflow
 
-**Recent sprints completed:**
-- FUI design system overhaul (Epics 1–8): tokens, base components, landing hero, coach dashboard, workout logger, analytics dashboard, history modal, mobile/performance audit
-- Foundation hardening: Sentry, error boundary, offline detection banner, retry logic on initial data load
-- Coach features: compliance dashboard, cohort analytics, push notifications (full stack), client notes, block notes, coach session feedback, program duplication, template library maturity, exercise category filter, day reordering, batch exercise import
-- Trainee features: workout history drill-down, autoregulation banner, deload detection, body weight log, progress report, 1RM goal lines on charts, account settings (name + password)
-- Bug fixes: invite code use_count increment, password trimming consistency, tenant isolation fallback removed, archived program write protection, video blob URL revocation, timezone-correct analytics dates, impersonation hardening, `LazyMotion strict` removal (production blocker), final FUI cleanup across 4 components, `ForgotPasswordPage` `redirectTo` simplification
+**Recent sprints completed (post 2026-05-09):**
+- **User-reported bug cleanup wave:** Archive ghost (editor landed on empty state instead of next active program), missing coach UI for archived blocks, duplicate did nothing visible, recent activity panel pushed page off-screen, coach notes leaked across trainees, block notes leaked across programs, OTP digit length mismatch (6 → 8), `App.tsx` `onDuplicateProgram` Promise type signature mismatch
+- **UX comfort features:** Drag-and-drop reordering (exercises + days with `@dnd-kit`), command palette (Cmd+K / Ctrl+K) with global search across clients/exercises/quick-actions, 1RM goal `ifOverflow="extendDomain"` so aspirational targets render above current data max, BodyWeightLog `data-testid` anchors for test hardening
+- **Free-text input expansion:** `reps`, `expectedRpe`, `actualRpe` columns no longer strip non-digit characters — coaches can enter `"6-8"`, `"AMRAP"`, `"5+"`, `"7-8"`, `"@8"`. `parseReps`/`parseLoad` in `analytics.ts` extract leading numbers when needed for e1RM and autoregulation
+- **Signup defense:** `SignupPage` defensive `useEffect` detects active session from a magic-link click and completes signup automatically instead of stranding the user on an OTP form
+- **Workout navigation redesign:** Sticky horizontal week tabs at the top of the program editor with smooth-scroll + auto-expand; each week wrapped in a collapsible card with smart default expansion (first unlogged week). Per-week DndContext stays mounted during collapse to preserve drag state
+- **Templates discoverability:** "Duplicate Block" renamed to "Branch Block" with a tooltip clarifying it's same-trainee; when a coach has multiple trainees but zero templates, a contextual hint surfaces the Templates path with a one-click "Save as Template" trigger
+- **Restore archived block:** `onRestoreProgram` was defined and implemented but never wired in `App.tsx` (silent failure via optional chaining). Now wired end-to-end; modal auto-closes on successful restore with confirmation toast
 
-**Open backlog (not started):**
-- Notification scheduling (currently only instant push)
+**Known gaps (NOT shipped despite assignment):**
+- **Invite code soft cap (5/coach) + EXHAUSTED state + Clear Exhausted bulk action** — assigned to Dev 2, delivered 0/10 requirements. Needs reassignment in the next sprint. Until then, coaches can generate unlimited codes and exhausted codes stay in the panel until manually deleted
+- **Workout Flow v2** (auto-advance, smart rest timer, end-of-workout summary screen) — assigned to Dev 2 across multiple sprints, never shipped
+
+**Open backlog (not yet assigned):**
+- Notification scheduling (currently only instant push via coach UI)
 - Week duplication within a program
 - CSV/PDF export of progress data
 - Mobile-specific testing of Capacitor builds
@@ -492,6 +500,7 @@ VITE_SENTRY_DSN=...                 # Error monitoring (optional)
 - Cross-device sync of coach notes (currently localStorage only)
 - Automated injury / pain tracking
 - Coach video library management
+- Cross-trainee program copying as a first-class feature (current path: Templates)
 
 ---
 

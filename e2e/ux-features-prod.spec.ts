@@ -938,4 +938,272 @@ test.describe.serial('UX comfort features — production E2E', () => {
     await expect(entry).toContainText('82.5 kg');
     await expect(entry).toContainText(today);
   });
+
+  // ─── Scenario 7 — reps + RPE free-text regression ──────────────────────
+  //
+  // Production fix removed `reps`, `expectedRpe`, `actualRpe` from the
+  // numeric-kind mapping (lib/numericInput.ts `kindForColumnId`). Those
+  // columns now accept ranges ("6-8"), notation ("AMRAP"), and modifiers
+  // ("5+", "@8") without the sanitizer stripping non-digits. If anyone
+  // re-adds them to the kind map by mistake, this test fails — it's the
+  // load-bearing regression guard for the coach prescription workflow.
+  test('Scenario 7: reps + RPE columns accept free-text input (ranges, notation, modifiers)', async ({
+    page,
+  }) => {
+    // Scenario 1 reordered Alice's exercises (Bench moved to position 2).
+    // Reset positions via service-role so row 0 deterministically maps to
+    // F.aliceExerciseIds!.bench again — keeps this test independent of
+    // sibling-test mutations.
+    await admin.from('exercises').update({ position: 0 }).eq('id', F.aliceExerciseIds!.bench);
+    await admin.from('exercises').update({ position: 1 }).eq('id', F.aliceExerciseIds!.squat);
+    await admin.from('exercises').update({ position: 2 }).eq('id', F.aliceExerciseIds!.deadlift);
+
+    await login(page, EMAIL.coach);
+    await expect(page.getByText(NAME.alice).first()).toBeVisible({ timeout: 15_000 });
+    await page.getByText(NAME.alice).first().click();
+    await page.getByTestId('admin-btn').click();
+    await expect(page.getByText(/Admin Panel/i)).toBeVisible({ timeout: 15_000 });
+    // Alice may not be the default selectedClient in AdminView — pick her
+    // explicitly so we know which exercise rows we're addressing.
+    await page.getByText(NAME.alice).first().click();
+    const row0 = page.getByTestId('exercise-row-0');
+    await expect(row0).toBeVisible({ timeout: 10_000 });
+    // Confirm the position reset took: row 0 should show Bench.
+    await expect(row0.locator('input').first()).toHaveValue(`Bench-${TS}`);
+
+    // Cell inputs inside an exercise row, in DOM order:
+    //   nth(0) → exercise name (combobox)
+    //   nth(1) → sets
+    //   nth(2) → reps
+    //   nth(3) → expectedRpe
+    //   nth(4..) → custom / actual columns (typed "Trainee Input" → text node)
+    const repsInput = row0.locator('input').nth(2);
+    const rpeInput = row0.locator('input').nth(3);
+
+    const exId = F.aliceExerciseIds!.bench;
+
+    // ── Reps: range survives, AMRAP survives, modifier survives ─────────
+    const repsCases: Array<{ typed: string; rejected: string }> = [
+      { typed: '6-8', rejected: '68' },
+      { typed: 'AMRAP', rejected: '' },
+      { typed: '5+', rejected: '5' },
+    ];
+    for (const { typed, rejected } of repsCases) {
+      await repsInput.click();
+      await repsInput.fill(typed);
+      // Verify DOM value as typed, then blur and re-verify (catches the
+      // commit-time sanitizer if anyone wires it back up).
+      await expect(repsInput, `reps DOM value after type "${typed}"`).toHaveValue(typed);
+      await repsInput.blur();
+      await expect(repsInput, `reps DOM value after blur "${typed}"`).toHaveValue(typed);
+      expect(typed, 'reps regression guard: rejected variant should differ').not.toBe(rejected);
+      // Wait for the debounced save (~500 ms + write round-trip) and read
+      // back via service-role.
+      await expect
+        .poll(
+          async () => {
+            const { data } = await admin
+              .from('exercises')
+              .select('reps')
+              .eq('id', exId)
+              .single<{ reps: string | null }>();
+            return data?.reps ?? null;
+          },
+          { timeout: 10_000 },
+        )
+        .toBe(typed);
+    }
+
+    // ── Expected RPE: range + @-notation survive ────────────────────────
+    const rpeCases: string[] = ['7-8', '@8'];
+    for (const typed of rpeCases) {
+      await rpeInput.click();
+      await rpeInput.fill(typed);
+      await expect(rpeInput, `expectedRpe DOM value after type "${typed}"`).toHaveValue(typed);
+      await rpeInput.blur();
+      await expect(rpeInput, `expectedRpe DOM value after blur "${typed}"`).toHaveValue(typed);
+      await expect
+        .poll(
+          async () => {
+            const { data } = await admin
+              .from('exercises')
+              .select('expected_rpe')
+              .eq('id', exId)
+              .single<{ expected_rpe: string | null }>();
+            return data?.expected_rpe ?? null;
+          },
+          { timeout: 10_000 },
+        )
+        .toBe(typed);
+    }
+  });
+});
+
+// ─── Task 3 — Signup OTP delivery (programmatic) ─────────────────────────
+//
+// Verifies the signInWithOtp pipeline against the live Supabase config now
+// that the email templates serve only the {{ .Token }} for both "Confirm
+// signup" and "Magic Link" templates. We cannot read the email content
+// from Playwright; the contract here is "the request to /auth/v1/otp
+// succeeded and the form transitions to the OTP step without errors."
+//
+// Uses its own qa-*-rpe-* naming so cleanup is independent of the UX
+// describe block above. An unverified auth user is the byproduct (the OTP
+// flow creates the user up-front via shouldCreateUser: true); cleanup
+// deletes that user via service-role in afterAll.
+
+test.describe.serial('Signup OTP delivery — production E2E', () => {
+  test.skip(!HAS_ENV, 'VITE_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY required in .env');
+
+  const otpCoachEmail = `qa-coach-rpe-${TS}@irontrack.test`;
+  const otpInviteeEmail = `qa-trainee-rpe-${TS}@irontrack.test`;
+  const otpCoachName = `QA RpeCoach ${TS}`;
+  let otpCoachId = '';
+  let otpInviteCode = '';
+  let otpInviteId = '';
+  // Tracking separate from the UX describe block so cleanup is isolated.
+  const otpCreatedAuthIds = new Set<string>();
+  const otpCreatedProfileIds = new Set<string>();
+  const otpCreatedInviteIds = new Set<string>();
+
+  test.beforeAll(async () => {
+    // Coach.
+    const c = await admin.auth.admin.createUser({
+      email: otpCoachEmail,
+      password: PASSWORD,
+      email_confirm: true,
+      user_metadata: { name: otpCoachName, role: 'admin', tenant_id: null },
+    });
+    if (c.error || !c.data?.user) throw new Error(`coach provision: ${c.error?.message}`);
+    otpCoachId = c.data.user.id;
+    otpCreatedAuthIds.add(otpCoachId);
+    otpCreatedProfileIds.add(otpCoachId);
+    await admin
+      .from('profiles')
+      .update({ name: otpCoachName, role: 'admin', tenant_id: otpCoachId })
+      .eq('id', otpCoachId);
+
+    // Invite code on the coach's tenant.
+    const code = `RPE${TS.toString(36).toUpperCase()}`.slice(0, 14);
+    const { data: inv, error: invErr } = await admin
+      .from('invite_codes')
+      .insert({
+        code,
+        coach_id: otpCoachId,
+        tenant_id: otpCoachId,
+        coach_name: otpCoachName,
+        use_count: 0,
+      })
+      .select('id, code')
+      .single<{ id: string; code: string }>();
+    if (invErr || !inv) throw new Error(`invite provision: ${invErr?.message}`);
+    otpInviteCode = inv.code;
+    otpInviteId = inv.id;
+    otpCreatedInviteIds.add(inv.id);
+    console.log(
+      `[QA otp fixture] coach=${otpCoachId} invite=${otpInviteCode} email=${otpInviteeEmail}`,
+    );
+  });
+
+  test.afterAll(async () => {
+    if (!HAS_ENV) return;
+    // Find the invitee's auth user if signInWithOtp landed (shouldCreateUser
+    // creates an unverified row). Look it up by email.
+    try {
+      const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      const invitee = list?.users.find((u) => u.email?.toLowerCase() === otpInviteeEmail.toLowerCase());
+      if (invitee) otpCreatedAuthIds.add(invitee.id);
+    } catch (err) {
+      console.warn('[QA otp cleanup] invitee lookup failed', err);
+    }
+
+    if (otpCreatedInviteIds.size > 0) {
+      await admin.from('invite_codes').delete().in('id', Array.from(otpCreatedInviteIds));
+    }
+    if (otpCreatedProfileIds.size > 0) {
+      await admin.from('profiles').delete().in('id', Array.from(otpCreatedProfileIds));
+    }
+    let ok = 0;
+    let bad = 0;
+    for (const id of otpCreatedAuthIds) {
+      const { error } = await admin.auth.admin.deleteUser(id);
+      if (error) bad += 1;
+      else ok += 1;
+    }
+    console.log(`[QA otp cleanup] auth.users deleted=${ok} failed=${bad}`);
+    if (bad > 0) console.error('[QA otp cleanup] ⚠ partial cleanup — manual sweep required');
+    void otpInviteId;
+  });
+
+  test('signInWithOtp succeeds + form transitions to OTP step without errors', async ({ page }) => {
+    // Capture relevant network traffic + page errors throughout the test.
+    const otpResponses: Array<{ status: number; url: string }> = [];
+    const pageErrors: string[] = [];
+    const consoleErrors: string[] = [];
+    page.on('response', (res) => {
+      const u = res.url();
+      if (/\/auth\/v1\/otp/.test(u) || /\/auth\/v1\/signup/.test(u)) {
+        otpResponses.push({ status: res.status(), url: u });
+      }
+    });
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') consoleErrors.push(msg.text());
+    });
+
+    // Open the magic-link invite URL. The signup page reads ?invite= from
+    // the location and pre-fills the invite-code field.
+    await page.goto(`/?invite=${otpInviteCode}`);
+    await expect(page.getByTestId('signup-name')).toBeVisible({ timeout: 15_000 });
+    // The welcome banner confirms the invite was recognised server-side
+    // before we even submit — a quick sanity check that the magic-link
+    // path is intact.
+    await expect(page.getByTestId('invite-welcome-banner')).toBeVisible({ timeout: 10_000 });
+
+    // Fill the form.
+    await page.getByTestId('signup-name').fill(`QA Invitee ${TS}`);
+    await page.getByTestId('signup-email').fill(otpInviteeEmail);
+    await page.getByTestId('signup-password').fill(`Invitee-${TS}!`);
+    await page.getByTestId('signup-confirm').fill(`Invitee-${TS}!`);
+    // Invite-code field is pre-filled & read-only when arriving via magic link.
+
+    // Submit. signInWithOtp fires on success and the form transitions to
+    // the "Enter code" step.
+    await page.getByTestId('signup-submit-btn').click();
+
+    // The OTP step renders the `signup-otp` input when the request succeeded.
+    // We assert visibility within 15s to allow for the Supabase round-trip.
+    await expect(page.getByTestId('signup-otp')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('signup-verify-btn')).toBeVisible();
+
+    // Assert: at least one /auth/v1/otp call returned a 2xx status. The
+    // template fix shouldn't have changed the network contract.
+    const otpAttempts = otpResponses.filter((r) => /\/auth\/v1\/otp/.test(r.url));
+    expect(otpAttempts.length, `otp requests: ${JSON.stringify(otpResponses)}`).toBeGreaterThan(0);
+    const success = otpAttempts.some((r) => r.status >= 200 && r.status < 300);
+    expect(
+      success,
+      `expected at least one 2xx /auth/v1/otp response; got ${JSON.stringify(otpAttempts)}`,
+    ).toBe(true);
+
+    // No page-level errors or console errors should fire during the
+    // happy-path send.
+    expect(pageErrors, `pageerrors during signup: ${pageErrors.join(' | ')}`).toEqual([]);
+    // The signup page intentionally logs "Could not send the verification
+    // email" only on a 4xx/5xx OTP response; we asserted the OTP succeeded
+    // above, so any console.error here is unexpected.
+    const unexpected = consoleErrors.filter(
+      (e) =>
+        !/React DevTools/i.test(e) &&
+        !/\[vite\]/i.test(e) &&
+        // motion v11 LazyMotion advisory — harmless in dev, gone in prod
+        // bundle, but allow-listed defensively.
+        !/LazyMotion/i.test(e),
+    );
+    expect(unexpected, `unexpected console errors: ${unexpected.join(' | ')}`).toEqual([]);
+
+    // We deliberately do NOT verify the OTP itself — the email can't be
+    // read from Playwright. The invitee auth user is left unverified and
+    // cleaned up in afterAll.
+  });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Edit3,
   Trash2,
@@ -6,8 +6,10 @@ import {
   BookmarkPlus,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
   GripVertical,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   DndContext,
   closestCenter,
@@ -69,6 +71,51 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
   // time, so a single id selector is enough rather than a per-day map.
   const [batchImportDayId, setBatchImportDayId] = useState<string | null>(null);
   const [batchDraft, setBatchDraft] = useState('');
+
+  // ── Week expand/collapse + tab navigation ────────────────────────────────
+  // Tracks which week cards are expanded. On mount we open the first week
+  // with at least one unlogged day so coaches land where they're actively
+  // editing — falling back to week 1 if the whole program is already
+  // logged. Lazy initializer so this only runs once per mount.
+  const [expandedWeekIds, setExpandedWeekIds] = useState<Set<string>>(() => {
+    const firstActive = program.weeks
+      .slice()
+      .sort((a, b) => a.weekNumber - b.weekNumber)
+      .find((w) => w.days.some((d) => !d.loggedAt));
+    return new Set(
+      firstActive
+        ? [firstActive.id]
+        : program.weeks[0]
+          ? [program.weeks[0].id]
+          : [],
+    );
+  });
+  // weekId → DOM element for the per-week wrapper, used by scrollToWeek to
+  // jump from the sticky tab bar to the target card.
+  const weekRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const toggleWeek = (weekId: string) => {
+    setExpandedWeekIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(weekId)) next.delete(weekId);
+      else next.add(weekId);
+      return next;
+    });
+  };
+
+  const scrollToWeek = (weekId: string) => {
+    const el = weekRefs.current[weekId];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Tab-bar click always reveals: if the target week was collapsed,
+    // expand it so the coach sees content after the scroll lands.
+    setExpandedWeekIds((prev) => {
+      if (prev.has(weekId)) return prev;
+      const next = new Set(prev);
+      next.add(weekId);
+      return next;
+    });
+  };
   // Drag-driven save indicator. Keyed on the day where the drop landed so
   // only that day's header flashes the badge — avoids "Saving..." appearing
   // on every visible day at once.
@@ -488,6 +535,10 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
   // (kept as a keyboard/accessibility fallback). Trailing 40px holds delete.
   const gridTemplate = `56px minmax(200px, 2fr) ${allCols.map(() => 'minmax(100px, 1fr)').join(' ')} 40px`;
 
+  // Sort once per render — the tab bar AND the weeks list both render in
+  // weekNumber order even if the underlying array is insertion-ordered.
+  const sortedWeeks = [...program.weeks].sort((a, b) => a.weekNumber - b.weekNumber);
+
   return (
     <>
       {/* Toolbar */}
@@ -523,10 +574,85 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
         </div>
       </div>
 
+      {/* Sticky week-jump tab bar — horizontally scrollable on narrow
+          viewports so a 12+ week block doesn't blow out the row. The active
+          tab corresponds to the currently-expanded week; clicking jumps the
+          scroll and force-expands the target. */}
+      <div className="sticky top-0 z-30 -mx-8 px-8 py-3 bg-background/95 backdrop-blur-md border-b border-primary/20 flex items-center gap-1 overflow-x-auto no-scrollbar mb-6">
+        <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground mr-2 shrink-0">
+          Jump to:
+        </span>
+        {sortedWeeks.map((w) => {
+          const isActive = expandedWeekIds.has(w.id);
+          const logged = w.days.filter((d) => d.loggedAt).length;
+          const total = w.days.length;
+          const complete = total > 0 && logged === total;
+          return (
+            <button
+              key={w.id}
+              onClick={() => scrollToWeek(w.id)}
+              data-testid={`week-tab-${w.weekNumber}`}
+              className={cn(
+                'px-2.5 py-1 text-[11px] font-mono tabular-nums border transition-colors shrink-0',
+                isActive
+                  ? 'border-primary text-primary bg-primary/10'
+                  : 'border-border/50 text-muted-foreground hover:border-primary/40 hover:text-primary',
+                complete && !isActive && 'border-accent/40 text-accent',
+              )}
+              title={`Week ${w.weekNumber} — ${logged}/${total} days logged`}
+            >
+              W{w.weekNumber}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Weeks */}
       <div className="space-y-8">
-        {program.weeks.map((week) => (
-          <TechnicalCard key={week.id} className="p-8">
+        {sortedWeeks.map((week) => {
+          const isExpanded = expandedWeekIds.has(week.id);
+          const loggedCount = week.days.filter((d) => d.loggedAt).length;
+          const totalDays = week.days.length;
+          return (
+          <div
+            key={week.id}
+            ref={(el) => { weekRefs.current[week.id] = el; }}
+            data-testid={`week-card-${week.weekNumber}`}
+          >
+          <TechnicalCard className="overflow-visible">
+            {/* Clickable header — always visible. Toggles the body via
+                AnimatePresence so the per-week DndContext stays mounted
+                inside the (height: 0) wrapper rather than being unmounted. */}
+            <button
+              type="button"
+              onClick={() => toggleWeek(week.id)}
+              className="w-full flex justify-between items-center px-8 py-4 hover:bg-primary/5 transition-colors"
+              data-testid={`week-header-${week.weekNumber}`}
+              aria-expanded={isExpanded}
+            >
+              <div className="flex items-center gap-3">
+                {isExpanded
+                  ? <ChevronDown className="w-4 h-4 text-primary" />
+                  : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                <h3 className="text-sm font-mono font-bold uppercase tracking-[0.25em] text-primary">
+                  WEEK {week.weekNumber}
+                </h3>
+              </div>
+              <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">
+                {totalDays} day{totalDays !== 1 ? 's' : ''} · {loggedCount}/{totalDays} logged
+              </span>
+            </button>
+
+            <AnimatePresence initial={false}>
+              {isExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeOut' }}
+                  style={{ overflow: 'hidden' }}
+                >
+                  <div className="px-8 pb-8">
             {/* Week header */}
             <div className="flex justify-between items-center mb-8 border-b border-border pb-6">
               <div className="flex items-center space-x-4">
@@ -944,8 +1070,14 @@ export function ProgramEditor({ program, onChange, onSaveAsTemplate }: ProgramEd
                 </div>
               </SortableContext>
             </DndContext>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </TechnicalCard>
-        ))}
+          </div>
+          );
+        })}
       </div>
 
       <ColumnModal
